@@ -116,11 +116,11 @@ LOGGING = {
             # But the emails are plain text by default - HTML is nicer
             'include_html': True,
         },
-        # # Log to a text file that can be rotated by logrotate
-        # 'logfile': {
-        #     'class': 'logging.handlers.WatchedFileHandler',
-        #     'filename': '/var/log/indabom/django.log'
-        # },
+        # Log to a text file that can be rotated by logrotate
+        'logfile': {
+            'class': 'logging.handlers.WatchedFileHandler',
+            'filename': '/var/log/indabom/django.log'
+        },
     },
     'loggers': {
         # Again, default Django configuration to email unhandled exceptions
