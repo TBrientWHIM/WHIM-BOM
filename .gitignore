@@ -296,3 +296,7 @@ ENV/
 *.sqlite3
 .idea
 *.bak
+# Elastic Beanstalk Files
+.elasticbeanstalk/*
+!.elasticbeanstalk/*.cfg.yml
+!.elasticbeanstalk/*.global.yml

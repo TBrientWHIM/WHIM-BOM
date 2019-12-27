@@ -9,7 +9,6 @@ bom/context_processors.py
 bom/decorators.py
 bom/forms.py
 bom/helpers.py
-bom/local_settings.py
 bom/models.py
 bom/settings.py
 bom/tests.py

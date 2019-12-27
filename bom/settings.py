@@ -50,6 +50,11 @@ MIDDLEWARE = [
     'social_django.middleware.SocialAuthExceptionMiddleware',
 ]
 
+ALLOWED_HOSTS = [
+    'whim-bom-env.tfzhyd8i9w.us-west-2.elasticbeanstalk.com',
+    '127.0.0.1',
+]
+
 ROOT_URLCONF = 'bom.urls'
 
 AUTHENTICATION_BACKENDS = (
