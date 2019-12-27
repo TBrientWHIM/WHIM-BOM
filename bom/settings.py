@@ -117,10 +117,10 @@ LOGGING = {
             'include_html': True,
         },
         # Log to a text file that can be rotated by logrotate
-        'logfile': {
-            'class': 'logging.handlers.WatchedFileHandler',
-            'filename': '/var/log/indabom/django.log'
-        },
+        # 'logfile': {
+        #     'class': 'logging.handlers.WatchedFileHandler',
+        #     'filename': '/var/log/indabom/django.log'
+        # },
     },
     'loggers': {
         # Again, default Django configuration to email unhandled exceptions
@@ -130,17 +130,17 @@ LOGGING = {
             'propagate': True,
         },
         # Might as well log any errors anywhere else in Django
-        'django': {
-            'handlers': ['logfile'],
-            'level': 'ERROR',
-            'propagate': False,
-        },
-        # django-bom app
-        'bom': {
-            'handlers': ['logfile'],
-            'level': 'INFO',  # Or maybe INFO or DEBUG
-            'propagate': False
-        },
+        # 'django': {
+        #     'handlers': ['logfile'],
+        #     'level': 'ERROR',
+        #     'propagate': False,
+        # },
+        # # django-bom app
+        # 'bom': {
+        #     'handlers': ['logfile'],
+        #     'level': 'INFO',  # Or maybe INFO or DEBUG
+        #     'propagate': False
+        # },
     },
 }
 
