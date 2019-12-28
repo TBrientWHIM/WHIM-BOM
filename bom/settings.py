@@ -53,6 +53,7 @@ MIDDLEWARE = [
 ALLOWED_HOSTS = [
     'whim-bom-env.tfzhyd8i9w.us-west-2.elasticbeanstalk.com',
     '127.0.0.1',
+    'whim-bom-env.xeaii9z94f.us-west-2.elasticbeanstalk.com',
 ]
 
 ROOT_URLCONF = 'bom.urls'
