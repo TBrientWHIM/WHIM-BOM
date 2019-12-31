@@ -410,6 +410,11 @@ def part_info(request, part_id, part_revision_id=None):
         if part_info_form.is_valid():
             qty = request.POST.get('quantity', 100)
 
+    try:
+        qty = int(qty)
+    except ValueError:
+        qty = 100
+
     cache.set(qty_cache_key, qty, timeout=None)
 
     try:
@@ -454,8 +459,7 @@ def part_info(request, part_id, part_revision_id=None):
         item['extended_cost'] = extended_quantity * \
                                 seller.unit_cost if seller is not None and seller.unit_cost is not None and extended_quantity is not None else None
         item['out_of_pocket_cost'] = order_qty * \
-                                     float(
-                                         seller.unit_cost) if seller is not None and seller.unit_cost is not None else 0
+                                     float(seller.unit_cost) if seller is not None and seller.unit_cost is not None else 0
 
         unit_cost = (
                 unit_cost +
@@ -834,9 +838,8 @@ def create_part(request):
             if mpn:
                 if old_manufacturer and new_manufacturer_name == '':
                     manufacturer = old_manufacturer
-                elif new_manufacturer_name.lower() != '' and not old_manufacturer.lower():
-                    manufacturer, created = Manufacturer.objects.get_or_create(name__iexact=new_manufacturer_name,
-                                                                               organization=organization)
+                elif new_manufacturer_name and new_manufacturer_name != '' and not old_manufacturer:
+                    manufacturer, created = Manufacturer.objects.get_or_create(name__iexact=new_manufacturer_name, organization=organization)
                 else:
                     messages.error(request, "Either create a new manufacturer, or select an existing manufacturer.")
                     return TemplateResponse(request, 'bom/create-part.html', locals())
@@ -1145,7 +1148,7 @@ def add_manufacturer_part(request, part_id):
                 return TemplateResponse(request, 'bom/add-manufacturer-part.html', locals())
 
             if new_manufacturer_name != '' and new_manufacturer_name is not None:
-                manufacturer, created = Manufacturer.objects.get_or_create(name__iexact=new_manufacturer_name, organization=organization)
+                manufacturer, created = Manufacturer.objects.get_or_create(name__iexact=new_manufacturer_name, organization=organization, defaults={'name': new_manufacturer_name})
                 manufacturer_part_form.cleaned_data['manufacturer'] = manufacturer
 
             manufacturer_part, created = ManufacturerPart.objects.get_or_create(part=part, manufacturer_part_number=manufacturer_part_number, manufacturer=manufacturer)

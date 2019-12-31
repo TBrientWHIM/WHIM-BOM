@@ -218,13 +218,13 @@ class Part(models.Model):
             return part_revision.indented()
 
     def optimal_seller(self, quantity=None):
-        if quantity is None:
+        if not quantity:
             qty_cache_key = str(self.id) + '_qty'
             quantity = int(cache.get(qty_cache_key, 100))
 
         manufacturer_parts = ManufacturerPart.objects.filter(part=self)
         sellerparts = SellerPart.objects.filter(manufacturer_part__in=manufacturer_parts)
-        return SellerPart.optimal(sellerparts, quantity)
+        return SellerPart.optimal(sellerparts, int(quantity))
 
     def assign_part_number(self):
         if self.number_item is None or self.number_item == '':
@@ -487,7 +487,7 @@ class PartRevision(models.Model):
     supply_voltage_units = models.CharField(max_length=5, default=None, null=True, blank=True, choices=VOLTAGE_UNITS)
     supply_voltage = models.DecimalField(max_digits=7, decimal_places=3, default=None, null=True, blank=True)
 
-    voltage_rating_units = models.CharField(max_length=2, default=None, null=True, blank=True, choices=VOLTAGE_UNITS)
+    voltage_rating_units = models.CharField(max_length=5, default=None, null=True, blank=True, choices=VOLTAGE_UNITS)
     voltage_rating = models.DecimalField(max_digits=7, decimal_places=3, default=None, null=True, blank=True)
 
     CURRENT_UNITS = (
@@ -500,7 +500,7 @@ class PartRevision(models.Model):
         ('Other', 'Other'),
     )
 
-    current_rating_units = models.CharField(max_length=2, default=None, null=True, blank=True, choices=CURRENT_UNITS)
+    current_rating_units = models.CharField(max_length=5, default=None, null=True, blank=True, choices=CURRENT_UNITS)
     current_rating = models.DecimalField(max_digits=7, decimal_places=3, default=None, null=True, blank=True)
 
     def generate_synopsis(self, make_searchable=False):

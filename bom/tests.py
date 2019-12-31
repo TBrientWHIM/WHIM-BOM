@@ -7,7 +7,7 @@ from re import finditer
 
 from .helpers import create_some_fake_parts, create_a_fake_organization, create_a_fake_part_revision, \
     create_a_fake_subpart, create_some_fake_part_classes, create_some_fake_manufacturers, create_some_fake_sellers
-from .models import Part, SellerPart, ManufacturerPart, Seller
+from .models import Part, SellerPart, ManufacturerPart, Seller, PartClass
 from .forms import PartInfoForm, PartForm, AddSubpartForm, AddSellerPartForm
 
 
@@ -51,6 +51,14 @@ class TestBOM(TransactionTestCase):
 
         # test having no revisions
         response = self.client.post(reverse('bom:part-info', kwargs={'part_id': p4.id}))
+        self.assertEqual(response.status_code, 200)
+
+        # set quantity
+        response = self.client.post(reverse('bom:part-info', kwargs={'part_id': p1.id}), {'quantity': 1000})
+        self.assertEqual(response.status_code, 200)
+
+        # test cache hit - TODO: probably want to make sure cache works
+        response = self.client.post(reverse('bom:part-info', kwargs={'part_id': p1.id}))
         self.assertEqual(response.status_code, 200)
 
     def test_part_manage_bom(self):
@@ -349,6 +357,17 @@ class TestBOM(TransactionTestCase):
                 found_error = True
         self.assertTrue(found_error)
 
+    def test_upload_part_classes(self):
+        self.client.login(username='kasper', password='ghostpassword')
+
+        # Should pass
+        with open('bom/test_files/test_part_classes.csv') as test_csv:
+            response = self.client.post(reverse('bom:settings'), {'file': test_csv, 'submit-part-class-upload': ''})
+        self.assertEqual(response.status_code, 200)
+
+        new_part_class_count = PartClass.objects.all().count()
+        self.assertEqual(new_part_class_count, 37)
+
     def test_add_sellerpart(self):
         self.client.login(username='kasper', password='ghostpassword')
 
@@ -404,6 +423,26 @@ class TestBOM(TransactionTestCase):
         (p1, p2, p3, p4) = create_some_fake_parts(organization=self.organization)
         response = self.client.post(reverse('bom:sellerpart-delete', kwargs={'sellerpart_id': p1.optimal_seller().id}))
 
+        self.assertEqual(response.status_code, 302)
+
+    def test_add_manufacturer_part(self):
+        self.client.login(username='kasper', password='ghostpassword')
+
+        (p1, p2, p3, p4) = create_some_fake_parts(organization=self.organization)
+        # Test GET
+        response = self.client.get(reverse('bom:part-add-manufacturer-part', kwargs={'part_id': p1.id}))
+
+        # Test POSTs
+        mfg_form_data = {'name': p1.primary_manufacturer_part.manufacturer.name,
+                         'manufacturer_part_number': p1.primary_manufacturer_part.manufacturer_part_number,
+                         'part': p2.id}
+        response = self.client.post(reverse('bom:part-add-manufacturer-part', kwargs={'part_id': p1.id}), mfg_form_data)
+        self.assertEqual(response.status_code, 302)
+
+        mfg_form_data = {'name': "A new mfg name",
+                         'manufacturer_part_number': "a new pn",
+                         'part': p2.id}
+        response = self.client.post(reverse('bom:part-add-manufacturer-part', kwargs={'part_id': p1.id}), mfg_form_data)
         self.assertEqual(response.status_code, 302)
 
     def test_manufacturer_part_edit(self):
