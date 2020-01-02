@@ -102,9 +102,9 @@ def home(request):
         query_stripped = query.strip()
 
         # Parse terms separated by white space but keep together words inside of double quotes,
-        # for example 
-        #   "Big Company Inc." 
-        # is parsed as 'Big Company Inc.' while 
+        # for example
+        #   "Big Company Inc."
+        # is parsed as 'Big Company Inc.' while
         #    Big Company Inc.
         # is parsed as 'Big' 'Company' 'Inc.'
         search_terms = query_stripped
@@ -839,7 +839,7 @@ def create_part(request):
                 if old_manufacturer and new_manufacturer_name == '':
                     manufacturer = old_manufacturer
                 elif new_manufacturer_name and new_manufacturer_name != '' and not old_manufacturer:
-                    manufacturer, created = Manufacturer.objects.get_or_create(name__iexact=new_manufacturer_name, organization=organization)
+                    manufacturer, created = Manufacturer.objects.get_or_create(name__iexact=new_manufacturer_name, organization=organization, defaults={'name': new_manufacturer_name})
                 else:
                     messages.error(request, "Either create a new manufacturer, or select an existing manufacturer.")
                     return TemplateResponse(request, 'bom/create-part.html', locals())
@@ -849,7 +849,7 @@ def create_part(request):
             new_part.organization = organization
             try:
                 new_part.assign_part_number()
-                # Check uniqueness of part number NOT including the number revision. Want 
+                # Check uniqueness of part number NOT including the number revision. Want
                 # to make sure that the part does not exist at all, as such, whether or not
                 # is has revisions is not relevant.
                 Part.objects.get(number_class=new_part.number_class, number_item=new_part.number_item)
@@ -859,7 +859,7 @@ def create_part(request):
                 pass
             if part_revision_form.is_valid():
                 # Save the Part before the PartRevision, as this will again check for part
-                # number uniqueness. This way if someone else(s) working concurrently is also 
+                # number uniqueness. This way if someone else(s) working concurrently is also
                 # using the same part number, then only one person will succeed.
                 try:
                     new_part.save()  # Database checks that the part number is still unique
