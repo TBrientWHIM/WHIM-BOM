@@ -13,7 +13,7 @@ ALLOWED_HOSTS = ['*']
 
 BOM_CONFIG = {
     # docs: https://api.mouser.com/api/docs/ui/index
-    'mouser_api_key': 'secret_mouser_key', # via https://www.mouser.com/MyMouser/MouserSearchApplication.aspx
+    'mouser_api_key': '1d412cfb-ec4b-4655-906b-46dcaaf30e5e', # via https://www.mouser.com/MyMouser/MouserSearchApplication.aspx
 }
 
 # google GoogleOAuth
