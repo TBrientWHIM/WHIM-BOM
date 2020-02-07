@@ -10,11 +10,8 @@
     <link rel="stylesheet" type="text/css" href="{% static 'bom/style.css' %}"/>
 {% endblock %}
 
-{% block bom-menu %}
-
-{% endblock %}
-
 {% block content %}
+    {% include 'bom/bom-action-btn.html' with profile=profile %}
     <div class="container-app">
         <div class="part-info">
             <div class="row" style="margin-bottom: 5px;">
@@ -36,8 +33,8 @@
                                 {% for r in revisions.all %}
                                     <option {% if part_revision.id == r.id %}selected{% endif %}
                                             value="{% if r == part.latest %}{% url 'bom:part-info' part_id=part.id %}
-						   {% else %}{% url 'bom:part-info-history' part_id=part.id part_revision_id=r.id %}
-						   {% endif %}">Rev {{ r.revision }}{% if r.configuration == 'W' %} (working){% endif %}</option>
+                                                    {% else %}{% url 'bom:part-info-history' part_id=part.id part_revision_id=r.id %}
+                                                    {% endif %}">Rev {{ r.revision }}{% if r.configuration == 'W' %} (working){% endif %}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -96,7 +93,7 @@
                             <div class="hide-on-small-and-down" style="width: 100%; margin: 0px;">
                                 {{ part_info_form }}
                             </div>
-                            <input type="submit" style="position: absolute; visibility: hidden;">
+                            <input type="submit" style="position: absolute; visibility: hidden; display: none;">
                         </form>
                     </div>
                 {% endif %}
@@ -105,10 +102,10 @@
             <div class="row">
                 <div class="col s12">
                     <ul id="tabs" class="tabs tabs-fixed-width">
-                        <li class="tab"><a href="#specs">Specifications</a></li>
-                        <li class="tab"><a href="#bom">Bill of Materials</a></li>
-                        <li class="tab"><a href="#used">Where Used</a></li>
-                        <li class="tab"><a href="#sourcing">Sourcing</a></li>
+                        <li class="tab"><a href="#specs" onclick="selectAnchor('specs')">Specifications</a></li>
+                        <li class="tab"><a href="#bom" onclick="selectAnchor('bom')">Bill of Materials</a></li>
+                        <li class="tab"><a href="#used" onclick="selectAnchor('used')">Where Used</a></li>
+                        <li class="tab"><a href="#sourcing" onclick="selectAnchor('sourcing')">Sourcing</a></li>
                     </ul>
                 </div>
 
@@ -287,7 +284,7 @@
                         <div class="row" style="padding-top: 16px;">
                             <div class="col s6 push-s6 right-align">
                                 <a class="waves-effect waves-green grey lighten-4 btn-flat"
-                                   href="{% url 'bom:part-add-manufacturer-part' part_id=part.id %}" style="margin: 10px;">Add Manufacturer Part</a>
+                                   href="{% url 'bom:part-add-manufacturer-part' part_id=part.id %}" style="margin: 10px;">Add Mfg Part</a>
                             </div>
                         </div>
                     {% endif %}
@@ -381,7 +378,6 @@
             </div>
         </div>
     </div>
-    {% include 'bom/bom-action-btn.html' with profile=profile %}
 {% endblock %}
 {% block bom-script %}
     <!-- Materialize initializer -->
@@ -401,6 +397,11 @@
     <script type='text/javascript'>
         var tabsElem = document.querySelector('.tabs');
         var tabs = M.Tabs.init(tabsElem);
+
+        function selectAnchor(anchor) {
+            {#window.localStorage['part-info-last-anchor'] = anchor;#}
+        }
+
         {% if tab_anchor %}
             tabs.select('{{tab_anchor}}');
         {% endif %}
@@ -413,12 +414,17 @@
                     constrainWidth: false, // Does not change width of dropdown to that of the activator
                     hover: false, // Activate on hover
                     gutter: 0, // Spacing from edge
-                    belowOrigin: false, // Displays dropdown below the button
                     alignment: 'left', // Displays dropdown with edge aligned to the left of button
-                    stopPropagation: false // Stops event propagation
+                    stopPropagation: false, // Stops event propagation
+                    coverTrigger: false
                 }
             );
 
+            {% if not tab_anchor %}
+                if (window.localStorage['part-info-last-anchor']) {
+                    {#tabs.select(window.localStorage['part-info-last-anchor']);#}
+                }
+            {% endif %}
         });
     </script>
 
@@ -491,20 +497,30 @@
         }
     </script>
 
-    <!-- -->
+    <!-- Match Seller Parts -->
     <script>
-        $(document).ready(function () {
-            {% if part_revision.id %}
-                $.get(
-                    "{% url 'json:mouser-part-match-bom' part_revision_id=part_revision.id %}",
-                    function (response) {
-                        var content = response['content'];
-                        var errors = response['errors'];
-                        console.log(content);
-                    }
-                );
-            {% endif %}
-        })
+        {% if 0 %} {# This functionality isn't ready yet... #}
+            var partMatchData = {};
+            $(document).ready(function () {
+                {% if part_revision.id %}
+                    $.get(
+                        "{% url 'json:mouser-part-match-bom' part_revision_id=part_revision.id %}",
+                        function (response) {
+                            partMatchData = response['content'];
+                            var errors = response['errors'];
+                            if (errors.length > 0) {
+                                {#  TODO: Update views  #}
+                                console.error(errors);
+                                alert('Error getting mouser data');
+                            } else {
+                                console.log(partMatchData);
+                                {#  TODO: Update views  #}
+                            }
+                        }
+                    );
+                {% endif %}
+            })
+        {% endif %}
     </script>
     <script>
         function showFlatBOM() {

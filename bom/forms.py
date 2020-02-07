@@ -7,6 +7,8 @@ from django.utils.translation import gettext_lazy as _
 from django.db import IntegrityError
 from django.core.exceptions import ValidationError
 
+from .constants import VALUE_UNITS, PACKAGE_TYPES, POWER_UNITS, INTERFACE_TYPES, TEMPERATURE_UNITS, DISTANCE_UNITS, WAVELENGTH_UNITS, \
+    WEIGHT_UNITS, FREQUENCY_UNITS, VOLTAGE_UNITS, CURRENT_UNITS, MEMORY_UNITS, SUBSCRIPTION_TYPES, ROLE_TYPES, CONFIGURATION_TYPES
 from .models import Part, PartClass, Manufacturer, ManufacturerPart, Subpart, Seller, SellerPart, User, UserMeta, \
     Organization, PartRevision, AssemblySubparts, Assembly
 from .validators import decimal, numeric
@@ -484,24 +486,24 @@ class PartCSVForm(forms.Form):
                         setattr(part_revision, prop_free_form, part_data[prop_free_form])
 
                 # Optional properties with choices for values:
-                props_with_value_choices = {'package': PartRevision.PACKAGE_TYPES, 'interface': PartRevision.INTERFACE_TYPES}
+                props_with_value_choices = {'package': PACKAGE_TYPES, 'interface': INTERFACE_TYPES}
                 for k, v in props_with_value_choices.items():
                     if k in part_data:
                         if is_valid_choice(part_data[k], v):
                             setattr(part_revision, k, part_data[k])
                         else:
-                            self.add_warning(None, "'{0}' is an invalid choice of value for '{1}' for part in row {2} . Uploading of this property skipped. "
-                                                   "Part will still be uploaded".format(part_data[k], k, row_count))
+                            self.warnings.append("'{0}' is an invalid choice of value for '{1}' for part in row {2} . Uploading of this property skipped. "
+                                                       "Part will still be uploaded".format(part_data[k], k, row_count))
 
                 # Optional properties with units:
                 props_with_unit_choices = {
-                    'value': PartRevision.VALUE_UNITS,
-                    'supply_voltage': PartRevision.VOLTAGE_UNITS, 'power_rating': PartRevision.POWER_UNITS,
-                    'voltage_rating': PartRevision.VOLTAGE_UNITS, 'current_rating': PartRevision.CURRENT_UNITS,
-                    'temperature_rating': PartRevision.TEMPERATURE_UNITS, 'memory': PartRevision.MEMORY_UNITS,
-                    'frequency': PartRevision.FREQUENCY_UNITS, 'wavelength': PartRevision.WAVELENGTH_UNITS,
-                    'length': PartRevision.DISTANCE_UNITS, 'width': PartRevision.DISTANCE_UNITS,
-                    'height': PartRevision.DISTANCE_UNITS, 'weight': PartRevision.WEIGHT_UNITS,
+                    'value': VALUE_UNITS,
+                    'supply_voltage': VOLTAGE_UNITS, 'power_rating': POWER_UNITS,
+                    'voltage_rating': VOLTAGE_UNITS, 'current_rating': CURRENT_UNITS,
+                    'temperature_rating': TEMPERATURE_UNITS, 'memory': MEMORY_UNITS,
+                    'frequency': FREQUENCY_UNITS, 'wavelength': WAVELENGTH_UNITS,
+                    'length': DISTANCE_UNITS, 'width': DISTANCE_UNITS,
+                    'height': DISTANCE_UNITS, 'weight': WEIGHT_UNITS,
                 }
                 for k, v in props_with_unit_choices.items():
                     if k in part_data and k + '_units' in part_data:
@@ -577,6 +579,27 @@ class PartForm(forms.ModelForm):
         number_class = cleaned_data.get('number_class')
         number_item = cleaned_data.get('number_item')
         number_variation = cleaned_data.get('number_variation')
+
+        try:
+            if number_class is not None and number_class.code is not '':
+                Part.verify_format_number_class(number_class.code)
+        except AttributeError as e:
+            validation_error = forms.ValidationError(str(e), code='invalid')
+            self.add_error('number_class', validation_error)
+
+        try:
+            if number_item is not '':
+                Part.verify_format_number_item(number_item, self.organization.number_item_len)
+        except AttributeError as e:
+            validation_error = forms.ValidationError(str(e), code='invalid')
+            self.add_error('number_item', validation_error)
+
+        try:
+            if number_variation is not '':
+                Part.verify_format_number_variation(number_variation)
+        except AttributeError as e:
+            validation_error = forms.ValidationError(str(e), code='invalid')
+            self.add_error('number_variation', validation_error)
 
         try:
             Part.objects.get(
@@ -768,9 +791,9 @@ class AddSubpartForm(forms.Form):
                 number_variation=number_variation,
                 organization=self.organization
             ).latest()
-        except AttributeError:
+        except AttributeError as e:
             validation_error = forms.ValidationError(
-                ("Ill-formed part number {}.".format(subpart_part_number)),
+                "Ill-formed subpart part number... " + str(e) + ".",
                 code='invalid')
             self.add_error('subpart_part_number', validation_error)
         except PartClass.DoesNotExist:
@@ -823,9 +846,9 @@ class UploadBOMForm(forms.Form):
                 number_variation=number_variation,
                 organization=self.organization
             )
-        except AttributeError:
+        except AttributeError as e:
             validation_error = forms.ValidationError(
-                ("Ill-formed parent part number {}.".format(parent_part_number)),
+                "Ill-formed parent part number... " + str(e) + ".",
                 code='invalid')
             self.add_error('parent_part_number', validation_error)
         except PartClass.DoesNotExist:
@@ -980,7 +1003,7 @@ class BOMCSVForm(forms.Form):
                 AssemblySubparts.objects.get_or_create(assembly=parent_part_revision.assembly, subpart=new_subpart)
 
                 if not created:
-                    self.add_warning(None, f"Already created part on row {row_count}, {part_number}, rev {revision}, qty {count}, ref: {reference}. Did not create it again.")
+                    self.warnings.append(f"Already created part on row {row_count}, {part_number}, rev {revision}, qty {count}, ref: {reference}. Did not create it again.")
                 else:
                     info_msg = "Added subpart "
                     if reference:
