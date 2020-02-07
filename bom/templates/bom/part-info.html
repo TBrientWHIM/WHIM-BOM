@@ -5,9 +5,7 @@
 {% block head-title %}{{ part.full_part_number }}{% if part_revision %} {{ part_revision.synopsis }}{% endif %}{% endblock %}
 
 {% block head %}
-    <link rel="stylesheet" type="text/css" href="{% static 'bom/treetable-theme.css' %}"/>
-    <link rel="stylesheet" type="text/css" href="{% static 'bom/css/jquery.treetable.css' %}"/>
-    <link rel="stylesheet" type="text/css" href="{% static 'bom/style.css' %}"/>
+    <link rel="stylesheet" type="text/css" href="{% static 'bom/css/style.css' %}"/>
 {% endblock %}
 
 {% block content %}
@@ -58,14 +56,15 @@
                                             <i class="material-icons green-text text-lighten-1">edit</i>Edit</a>
                                     </li>
                                     <li>
-                                        <a class="green-text text-lighten-1" href="{% url 'bom:part-revision-new' part_id=part.id %}">
-                                            <i class="material-icons green-text text-lighten-1">add</i>New revision</a>
-                                    </li>
-                                    <li>
                                         <a class="green-text text-lighten-1" href="{% url 'bom:part-revision-release' part_id=part.id part_revision_id=part_revision.id %}">
                                             <i class="material-icons green-text text-lighten-1">check</i>Release</a>
                                     </li>
-                                {% elif part_revision.configuration == 'R' %}
+                                {% endif %}
+                                <li>
+                                    <a class="green-text text-lighten-1" href="{% url 'bom:part-revision-new' part_id=part.id %}">
+                                        <i class="material-icons green-text text-lighten-1">add</i>New revision</a>
+                                </li>
+                                {% if part_revision.configuration == 'R' %}
                                     <li>
                                         <a class="green-text text-lighten-1 disabled" onclick="revertPartRevision()">
                                             <i class="material-icons green-text text-lighten-1">undo</i>Revert to working</a>
@@ -87,10 +86,7 @@
                     <div class="col m2 push-l5 push-m4 s6 right-align part-info-form">
                         <form action="{% url 'bom:part-info' part_id=part.id %}" method="post">
                             {% csrf_token %}
-                            <div class="hide-on-med-and-up" style="width: 100%;">
-                                {{ part_info_form }}
-                            </div>
-                            <div class="hide-on-small-and-down" style="width: 100%; margin: 0px;">
+                            <div style="width: 100%;">
                                 {{ part_info_form }}
                             </div>
                             <input type="submit" style="position: absolute; visibility: hidden; display: none;">
@@ -137,10 +133,18 @@
                                 </i></div>
                             </div>
                             <div class="row">
-                                <div class="col s4 l2 text-right" style="padding-left: 0px;"><img title="Via Google Drive" style="width: 16px;"
-                                                                                                  src="{% static 'bom/img/google_drive_logo.svg' %}"></img> Files:
+                                <div class="col s4 l2 text-right" style="padding-left: 0;">
+                                    <img title="Via Google Drive" style="width: 16px;" src="{% static 'bom/img/google_drive_logo.svg' %}">&nbsp;Files:
                                 </div>
                                 <div class="col s8 l10"><a href="{% url 'google-drive:add-folder' part_id=part.id %}" target="_blank">Open Folder</a></div>
+                            </div>
+                            <div class="row">
+                                <div id="mouser-data-sheet-wrapper" style="display: none; min-height: 22px;">
+                                    <div class="col s4 l2 text-right" style="padding-left: 0;">
+                                        <img title="Via Mouser.com" style="width: 16px;" src="{% static 'bom/img/mouser.png' %}">&nbsp;Datasheets
+                                    </div>
+                                    <div class="col s8 l10"><a id="mouser-data-sheet" target="_blank">View datasheet</a></div>
+                                </div>
                             </div>
                         </li>
                         <li class="collection-header">
@@ -157,41 +161,40 @@
                             </div>
                             <div class="row">
                                 <div class="col s4 l2 text-right" style="padding-left: 0px;">Est. Cost:</div>
-                                <div class="col s8 l10">${{ unit_cost|floatformat:4 }}<span id="specs-revision-timestamp"></span></div>
+                                <div id="specs-unit-cost" class="col s8 l10"><span id="mouser-est-cost"></span><span>${{ indented_bom.unit_cost|floatformat:4 }}</span></div>
+                            </div>
+                            <div class="row">
+                                <div class="col s4 l2 text-right" style="padding-left: 0px;">Subparts without costs:</div>
+                                <div class="col s8 l10"><span id="mouser-missing-item-costs"></span><span>{{ indented_bom.missing_item_costs }}</span></div>
                             </div>
                             <div class="row">
                                 <div class="col s4 l2 text-right" style="padding-left: 0px;">Est. Total NRE:</div>
-                                <div class="col s8 l10">${{ unit_nre|floatformat:2 }}<span id="specs-revision-timestamp"></span></div>
+                                <div class="col s8 l10"><span id="mouser-est-nre"></span><span>${{ indented_bom.nre|floatformat:2 }}</span></div>
                             </div>
                             <div class="row">
-                                <div class="col s4 l2 text-right" style="padding-left: 0px;">Est. Unit Out Of Pocket:</div>
-                                <div class="col s8 l10">${{ unit_out_of_pocket_cost|floatformat:2 }}<span id="specs-revision-timestamp"></span></div>
+                                <div class="col s4 l2 text-right" style="padding-left: 0px;">Est. Cost per {{ qty }} Unit Order (Including MOQs):</div>
+                                <div class="col s8 l10"><span id="mouser-est-cost-per-order"></span><span>${{ indented_bom.out_of_pocket_cost|floatformat:2 }}</span></div>
                             </div>
-                            <div class="row">
-                                <div class="col s4 l2 text-right" style="padding-left: 0px;">Est. Total Out Of Pocket:</div>
-                                <div class="col s8 l10">${{ total_out_of_pocket_cost|floatformat:2 }}<span id="specs-revision-timestamp"></span></div>
-                            </div>
-                            <div class="row">
-                                <div class="col s4 l2 text-right" style="padding-left: 0px;">Est. Unit Out Of Pocket:</div>
-                                <div class="col s8 l10">${{ unit_out_of_pocket_cost|floatformat:2 }}<span id="specs-revision-timestamp"></span></div>
+                            <div class="row" id="mouser-stock-wrapper" style="display: none;">
+                                <div class="col s4 l2 text-right" style="padding-left: 0px;">Mouser stock:</div>
+                                <div class="col s8 l10"><span id="mouser-stock"></span></div>
                             </div>
                         </li>
                     </ul>
                 </div>
-
 
                 <div id="bom" class="col s12">
                     <div id="bom-indented">
                         <div class="text-center" style="padding-top: 8px;">
                             <span>Indented</span> | <a onclick="showFlatBOM()" href="#">Flat</a>
                         </div>
-                        {% include 'bom/bom-indented.html' with order_by=order_by parts=parts part=part part_revision=part_revision profile=profile %}
+                        {% include 'bom/bom-indented.html' with order_by=order_by bom_items=indented_bom.parts part=part part_revision=part_revision profile=profile %}
                     </div>
                     <div id="bom-flat" style="display: none;">
                         <div class="text-center" style="padding-top: 8px;">
                             <a onclick="showIndentedBOM()" href="#">Indented</a> | <span>Flat</span>
                         </div>
-                        {% include 'bom/bom-flat.html' with order_by=order_by parts=parts_flat part=part part_revision=part_revision profile=profile %}
+                        {% include 'bom/bom-flat.html' with order_by=order_by bom_items=flat_bom.parts part=part part_revision=part_revision profile=profile %}
                     </div>
                 </div>
 
@@ -302,24 +305,23 @@
                                 <th>Lead Time (days)</th>
                                 <th>NRE</th>
                                 <th>NCNR</th>
-                                <th></th>
-                                <th colspan=2>Manage</th>
+                                <th colspan="2">Manage</th>
                             </tr>
                             </thead>
                             <tbody>
                             {% for manufacturer_part in part.manufacturer_parts %}
-                                <tr data-tt-id="{{ manufacturer_part.id }}">
+                                <tr id="sourcing-mp-{{ manufacturer_part.id }}" data-tt-id="{{ manufacturer_part.id }}">
                                     <td>{{ manufacturer_part.manufacturer_part_number }}</td>
                                     <td>{{ manufacturer_part.manufacturer }}</td>
-                                    <td>{{ manufacturer_part.optimal_seller.seller.name }}</td>
-                                    <td>{{ manufacturer_part.optimal_seller.minimum_order_quantity }}</td>
-                                    <td>{{ manufacturer_part.optimal_seller.minimum_pack_quantity }}</td>
-                                    <td>{{ manufacturer_part.optimal_seller.unit_cost }}</td>
-                                    <td>{{ manufacturer_part.optimal_seller.lead_time_days }}</td>
-                                    <td>{{ manufacturer_part.optimal_seller.nre_cost }}</td>
-                                    <td>{{ manufacturer_part.optimal_seller.ncnr }}</td>
-                                    <td style="min-width: 0px;"></td>
-                                    <td colspan="2">
+                                    <td id="sourcing-mp-{{ manufacturer_part.id }}-name">{{ manufacturer_part.optimal_seller.seller.name }}</td>
+                                    <td id="sourcing-mp-{{ manufacturer_part.id }}-moq">{{ manufacturer_part.optimal_seller.minimum_order_quantity }}</td>
+                                    <td id="sourcing-mp-{{ manufacturer_part.id }}-mpq">{{ manufacturer_part.optimal_seller.minimum_pack_quantity }}</td>
+                                    <td id="sourcing-mp-{{ manufacturer_part.id }}-cost">{{ manufacturer_part.optimal_seller.unit_cost }}</td>
+                                    <td id="sourcing-mp-{{ manufacturer_part.id }}-lt">{{ manufacturer_part.optimal_seller.lead_time_days }}</td>
+                                    <td id="sourcing-mp-{{ manufacturer_part.id }}-nre">{{ manufacturer_part.optimal_seller.nre_cost }}</td>
+                                    <td id="sourcing-mp-{{ manufacturer_part.id }}-ncnr">{{ manufacturer_part.optimal_seller.ncnr }}</td>
+                                    {#                                    <td style="min-width: 0px;"></td>#}
+                                    <td>
                                         {% if profile.role == 'A' %}
                                             <!-- Dropdown Trigger -->
                                             <a class='dropdown-trigger' href='#' data-target='dropdown{{ manufacturer_part.id }}'><i
@@ -343,7 +345,7 @@
                                     </td>
                                 </tr>
                                 {% for seller_part in manufacturer_part.seller_parts %}
-                                    <tr data-tt-id="0" data-tt-parent-id="{{ manufacturer_part.id }}">
+                                    <tr data-tt-id="0" data-tt-parent-id="{{ manufacturer_part.id }}" {% if forloop.last %}id="sourcing-{{ manufacturer_part.id }}-last"{% endif %}>
                                         <td></td>
                                         <td></td>
                                         <td>{{ seller_part.seller.name }}</td>
@@ -353,13 +355,10 @@
                                         <td>{{ seller_part.lead_time_days }}</td>
                                         <td>{{ seller_part.nre_cost }}</td>
                                         <td>{{ seller_part.ncnr }}</td>
-                                        <td style="min-width: 0px;">{% if seller_part.data_source == 'octopart' %}
-                                            <img title="Sourcing information via Octopart." style="width: 20px; vertical-align: middle;" src="{% static 'bom/img/octopart_blue.svg' %}">{% endif %}</td>
-                                        {% if profile.role == 'A' %}
-                                            <td><a href="{% url 'bom:sellerpart-edit' sellerpart_id=seller_part.id %}">edit</a></td>
-                                            <td><a href="{% url 'bom:sellerpart-delete' sellerpart_id=seller_part.id %}">delete</a>
-                                        {% endif %}
-                                        </td>
+                                        <td>{% if profile.role == 'A' %}
+                                            <a href="{% url 'bom:sellerpart-edit' sellerpart_id=seller_part.id %}">edit</a> |
+                                            <a href="{% url 'bom:sellerpart-delete' sellerpart_id=seller_part.id %}">delete</a>
+                                        {% endif %}</td>
                                     </tr>
                                 {% empty %}
                                     <tr data-tt-id="0" data-tt-parent-id="{{ manufacturer_part.id }}">
@@ -499,28 +498,150 @@
 
     <!-- Match Seller Parts -->
     <script>
-        {% if 0 %} {# This functionality isn't ready yet... #}
-            var partMatchData = {};
-            $(document).ready(function () {
-                {% if part_revision.id %}
-                    $.get(
-                        "{% url 'json:mouser-part-match-bom' part_revision_id=part_revision.id %}",
-                        function (response) {
-                            partMatchData = response['content'];
-                            var errors = response['errors'];
-                            if (errors.length > 0) {
-                                {#  TODO: Update views  #}
-                                console.error(errors);
-                                alert('Error getting mouser data');
-                            } else {
-                                console.log(partMatchData);
-                                {#  TODO: Update views  #}
-                            }
+        let partMatchData = {};
+        const mouserImage = '<img height="18" style="padding: 4px 4px 0 4px;" alt="Mouser" title="Via Mouser.com" src="{% static 'bom/img/mouser.png' %}">';
+        let specsUnitCost;
+        let specsEstCostPerOrder;
+        let specsMissingParts;
+        let dataSheet;
+        $(document).ready(function () {
+            {% if part_revision.id and mouser_parts %}
+                $.get("{% url 'json:mouser-part-match-bom' part_revision_id=part_revision.id %}",
+                    function (response) {
+                        partMatchData = response['content'];
+                        const errors = response['errors'];
+                        if (errors.length > 0) {
+                            console.error(errors);
+                        } else {
+                            const flatBom = partMatchData['flat_bom'];
+                            const bomParts = flatBom['parts'];
+                            const mouserInfo = flatBom['parts']['{{ part_revision.id }}']['api_info'];
+                            const sourcingParts = mouserInfo['seller_parts'];
+                            const stockParsed = mouserInfo['stock_parsed'];
+                            const optimalSellerPart = flatBom['parts']['{{ part_revision.id }}']['seller_part'];
+                            specsUnitCost = parseFloat(flatBom['unit_cost']).toFixed(4);
+                            specsEstCostPerOrder = parseFloat(flatBom['out_of_pocket_cost']).toFixed(2);
+                            specsMissingParts = flatBom['missing_item_costs'];
+                            dataSheet = mouserInfo['data_sheet'];
+                            mouserStock = mouserInfo['stock'];
+                            updateSpecs(specsUnitCost, specsEstCostPerOrder, specsMissingParts, dataSheet, mouserStock);
+                            updateFlat(bomParts);
+                            updateIndented(bomParts);
+                            updateSourcing(sourcingParts, optimalSellerPart, stockParsed);
+                            $("#indented-bom").trigger('update');
+                            $("#flat-bom").trigger('update');
                         }
-                    );
-                {% endif %}
-            })
-        {% endif %}
+                    }
+                );
+            {% endif %}
+        });
+
+        function updateSourcing(sellerParts, optimalSellerPart, stock) {
+            let lastRowDict = {};
+            let mouserOptimizations = 0;
+            if (sellerParts) {
+                sellerParts.forEach((sellerPart, index) => {
+                    if (sellerPart['data_source'] === 'Mouser') mouserOptimizations += 1;
+                    const manufacturerPartId = parseInt(sellerPart['manufacturer_part']);
+                    if (!(manufacturerPartId in lastRowDict)) {
+                        const lastRow = $(`#sourcing-${manufacturerPartId}-last`);
+                        if (lastRow.length === 0) {
+                            lastRowDict[manufacturerPartId] = $(`#sourcing-mp-${manufacturerPartId}`);
+                        } else {
+                            lastRowDict[manufacturerPartId] = lastRow;
+                        }
+                    }
+                    if (lastRowDict[manufacturerPartId]) {
+                        const moq = sellerPart['minimum_order_quantity'];
+                        const mpq = sellerPart['minimum_pack_quantity'];
+                        const price = parseFloat(sellerPart['unit_cost']).toFixed(4);
+                        const leadTime = `${sellerPart['lead_time_days']}`;
+                        const nre = parseFloat(sellerPart['nre_cost']).toFixed(4);
+                        const ncnr = "True";
+                        lastRowDict[manufacturerPartId].after(`<tr data-tt-id="${index + 1}" data-tt-parent-id="${manufacturerPartId}"><td></td><td></td><td>${mouserImage} Mouser</td><td>${moq}</td><td>${mpq}</td><td>${price}</td><td>${leadTime}</td><td>${nre}</td><td>${ncnr}</td><td>(${stock} in stock)</td></tr>`)
+                        const lastRow = lastRowDict[manufacturerPartId].closest('tr').next('tr');
+                        lastRowDict[manufacturerPartId] = lastRow;
+                        const parentNode = $("#manufacturer-parts").treetable("node", manufacturerPartId);
+                        $("#manufacturer-parts").treetable("loadBranch", parentNode, lastRow);
+                        $("#manufacturer-parts").treetable("collapseAll");
+                    }
+                });
+            }
+            if (optimalSellerPart && optimalSellerPart !== "None") {
+                const mpBaseId = `#sourcing-mp-${optimalSellerPart['manufacturer_part']}`;
+                if (optimalSellerPart['seller'] === null) { // TODO need to fix this to get the seller name via the API
+                    $(`${mpBaseId}-name`).text(optimalSellerPart['data_source']).prepend(mouserImage);
+                }
+                $(`${mpBaseId}-moq`).text(optimalSellerPart['minimum_order_quantity']);
+                $(`${mpBaseId}-mpq`).text(optimalSellerPart['minimum_pack_quantity']);
+                $(`${mpBaseId}-cost`).text(optimalSellerPart['unit_cost']);
+                $(`${mpBaseId}-lt`).text(optimalSellerPart['lead_time_days']);
+                $(`${mpBaseId}-nre`).text(optimalSellerPart['nre_cost']);
+                $(`${mpBaseId}-ncnr`).text(optimalSellerPart['ncnr']);
+            }
+        }
+
+        function updateSpecs(unitCost, estCostPerOrder, specsMissingParts, dataSheet, mouserStock) {
+            const mouserEstCost = $("#mouser-est-cost");
+            const mouserEstCostPerOrder = $("#mouser-est-cost-per-order");
+            const mouserMissingCosts = $("#mouser-missing-item-costs");
+            const mouserDataSheetWrapperElement = $("#mouser-data-sheet-wrapper");
+            const mouserDataSheetElement = $("#mouser-data-sheet");
+            const mouserStockWrapperElement = $("#mouser-stock-wrapper");
+            const mouserStockElement = $("#mouser-stock");
+            updateSpecElement(mouserEstCost, unitCost, `$${unitCost}`);
+            updateSpecElement(mouserEstCostPerOrder, estCostPerOrder, `$${estCostPerOrder}`);
+            updateSpecElement(mouserMissingCosts, specsMissingParts, `${specsMissingParts}`);
+            updateSpecElement(mouserStockElement, mouserStock, `${mouserStock}`, mouserStockWrapperElement, false);
+
+            if (dataSheet) {
+                mouserDataSheetElement.attr("href", `${dataSheet}`);
+                mouserDataSheetWrapperElement.show();
+            }
+        }
+
+        function updateSpecElement(element, property, text, wrapper = null, hasDefault = true) {
+            if (property != null) {
+                if (hasDefault) {
+                    element.text(text + ' ').prepend(mouserImage).next().css('color', '#bdbdbd').prepend('(').append(' without Mouser)');
+                } else {
+                    element.text(text).prepend(mouserImage);
+                    if (wrapper) {
+                        wrapper.show();
+                    }
+                }
+            }
+        }
+
+        function updateIndented(indentedBomParts) {
+            const baseUnitCostId = "#bom-indented-unit-cost-";
+            const baseSellerNameId = "#bom-indented-seller-name-";
+            updateBom(indentedBomParts, baseUnitCostId, baseSellerNameId);
+        }
+
+        function updateFlat(flatBomParts) {
+            const baseUnitCostId = "#bom-flat-unit-cost-";
+            const baseSellerNameId = "#bom-flat-seller-name-";
+            updateBom(flatBomParts, baseUnitCostId, baseSellerNameId);
+        }
+
+        function updateBom(bomParts, baseUnitCostId, baseSellerNameId) {
+            for (const partRevId in bomParts) {
+                if (bomParts.hasOwnProperty(partRevId) && bomParts[partRevId].hasOwnProperty('seller_part') && bomParts[partRevId].hasOwnProperty('api_info')) {
+                    const unitCost = parseFloat(bomParts[partRevId]['seller_part']['unit_cost']);
+                    const sellerName = bomParts[partRevId]['seller_part']['data_source'];
+                    const isMouser = bomParts[partRevId]['seller_part']['seller'] === 'None';
+                    const sourcingInfo = bomParts[partRevId]['api_info'] !== 'None';
+                    const unitCostId = `${baseUnitCostId}${partRevId}`;
+                    const unitCostElement = $(unitCostId);
+                    const sellerNameId = `${baseSellerNameId}${partRevId}`;
+                    const sellerNameElement = $(sellerNameId);
+                    if (unitCost && sourcingInfo) unitCostElement.text(`${unitCost.toFixed(4)}`);
+                    if (unitCost && sourcingInfo && bomParts[partRevId]['seller_part']['data_source'] === 'Mouser') unitCostElement.append(mouserImage);
+                    if (isMouser && sellerName) sellerNameElement.text(`${sellerName}`);
+                }
+            }
+        }
     </script>
     <script>
         function showFlatBOM() {

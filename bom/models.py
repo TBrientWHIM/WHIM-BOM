@@ -7,11 +7,15 @@ from django.db import models
 from django.contrib.auth.models import User, Group
 from django.utils import timezone
 from django.core.validators import MaxValueValidator, MinValueValidator
+from .part_bom import PartIndentedBomItem, PartBomItem, PartBom
 from .utils import increment_str, prep_for_sorting_nicely, listify_string, stringify_list, strip_trailing_zeros
 from .validators import alphanumeric, numeric, validate_pct
 from .constants import VALUE_UNITS, PACKAGE_TYPES, POWER_UNITS, INTERFACE_TYPES, TEMPERATURE_UNITS, DISTANCE_UNITS, WAVELENGTH_UNITS, \
-    WEIGHT_UNITS, FREQUENCY_UNITS, VOLTAGE_UNITS, CURRENT_UNITS, MEMORY_UNITS, SUBSCRIPTION_TYPES, ROLE_TYPES, CONFIGURATION_TYPES
+    WEIGHT_UNITS, FREQUENCY_UNITS, VOLTAGE_UNITS, CURRENT_UNITS, MEMORY_UNITS, SUBSCRIPTION_TYPES, ROLE_TYPES, CONFIGURATION_TYPES, \
+    NUMBER_SCHEMES
+from .base_classes import AsDictModel
 
+from math import ceil
 from social_django.models import UserSocialAuth
 
 logger = logging.getLogger(__name__)
@@ -21,7 +25,8 @@ class Organization(models.Model):
     name = models.CharField(max_length=255, default=None)
     subscription = models.CharField(max_length=1, choices=SUBSCRIPTION_TYPES)
     owner = models.ForeignKey(User, on_delete=models.PROTECT)
-    number_item_len = models.PositiveIntegerField(default=3, validators=[MinValueValidator(3), MaxValueValidator(10)])
+    number_scheme = models.CharField(max_length=1, choices=NUMBER_SCHEMES, default='S')
+    number_item_len = models.PositiveIntegerField(default=3, validators=[MinValueValidator(3), MaxValueValidator(128)])
     google_drive_parent = models.CharField(max_length=128, blank=True, default=None, null=True)
 
     def number_ns(self):
@@ -70,6 +75,7 @@ class PartClass(models.Model):
     code = models.CharField(max_length=CODE_LEN)
     name = models.CharField(max_length=255, default=None)
     comment = models.CharField(max_length=255, default=None, blank=True)
+    mouser_enabled = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ['code', 'name', 'organization', ]
@@ -80,7 +86,7 @@ class PartClass(models.Model):
         return u'%s' % (self.code + ': ' + self.name)
 
 
-class Manufacturer(models.Model):
+class Manufacturer(models.Model, AsDictModel):
     name = models.CharField(max_length=128, default=None)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, db_index=True)
 
@@ -96,12 +102,12 @@ class Manufacturer(models.Model):
 # that should be done often.
 class Part(models.Model):
     NUMBER_ITEM_MIN_LEN = 3
-    NUMBER_ITEM_MAX_LEN = 10
+    NUMBER_ITEM_MAX_LEN = 128
     NUMBER_VARIATION_LEN = 2
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, db_index=True)
     number_class = models.ForeignKey(PartClass, default=None, related_name='number_class', on_delete=models.PROTECT, db_index=True)
-    number_item = models.CharField(max_length=10, default=None, blank=True, validators=[numeric])
+    number_item = models.CharField(max_length=NUMBER_ITEM_MAX_LEN, default=None, blank=True, validators=[numeric])
     number_variation = models.CharField(max_length=2, default=None, blank=True, validators=[alphanumeric])
     primary_manufacturer_part = models.ForeignKey('ManufacturerPart', default=None, null=True, blank=True,
                                                   on_delete=models.SET_NULL, related_name='primary_manufacturer_part')
@@ -330,13 +336,13 @@ class PartRevision(models.Model):
     def generate_synopsis(self, make_searchable=False):
         def verbosify(val, units=None, pre=None, pre_whitespace=True, post=None, post_whitespace=True):
             elaborated = ""
-            if val is not None and val is not '':
+            if val is not None and val != '':
                 try:
                     elaborated = strip_trailing_zeros(str(val))
-                    if units is not None and units is not '': elaborated += units
-                    if pre is not None and pre is not '':
+                    if units is not None and units != '': elaborated += units
+                    if pre is not None and pre != '':
                         elaborated = pre + (' ' if pre_whitespace else '') + elaborated
-                    if post is not None and post is not '': elaborated += (' ' if post_whitespace else '') + post
+                    if post is not None and post != '': elaborated += (' ' if post_whitespace else '') + post
                     elaborated = elaborated + ' '
                 except ValueError:
                     pass
@@ -385,28 +391,31 @@ class PartRevision(models.Model):
         self.displayable_synopsis = self.generate_synopsis(False)
         super(PartRevision, self).save(*args, **kwargs)
 
-    def indented(self):
-        def indented_given_bom(bom, part_revision, parent_id=None, parent=None, qty=1, parent_qty=1, indent_level=0, subpart=None,
-                               reference='', do_not_load=False):
-            if part_revision is None:  # hopefully this never happens
-                logger.warning("Indented bom part_revision is None, this shouldn't happen, parent part_revision id: {}".format(parent.id))
-                return
+    def indented(self, top_level_quantity=100):
+        def indented_given_bom(bom, part_revision, parent_id=None, parent=None, qty=1, parent_qty=1, indent_level=0, subpart=None, reference='', do_not_load=False):
+            bom_item_id = (parent_id or '') + (str(part_revision.id) + '-dnl' if do_not_load else str(part_revision.id))
+            extended_quantity = parent_qty * qty
+            total_extended_quantity = top_level_quantity * extended_quantity
 
-            bom_id = str(part_revision.id) + '-dnl' if do_not_load else str(part_revision.id)
+            try:
+                seller_part = part_revision.part.optimal_seller(quantity=total_extended_quantity)
+            except AttributeError:
+                seller_part = None
 
-            bom.append({
-                'id': bom_id,
-                'part': part_revision.part,
-                'part_revision': part_revision,
-                'quantity': qty,
-                'parent_quantity': parent_qty,
-                'total_quantity': parent_qty * qty,
-                'indent_level': indent_level,
-                'parent_id': parent_id,
-                'subpart': subpart,
-                'do_not_load': do_not_load,
-                'reference': reference,
-            })
+            bom.append_item_and_update(PartIndentedBomItem(
+                bom_id=bom_item_id,
+                part=part_revision.part,
+                part_revision=part_revision,
+                do_not_load=do_not_load,
+                references=reference,
+                quantity=qty,
+                extended_quantity=extended_quantity,
+                parent_quantity=parent_qty,  # Do we need this?
+                indent_level=indent_level,
+                parent_id=parent_id,
+                subpart=subpart,
+                seller_part=seller_part,
+            ))
 
             indent_level = indent_level + 1
             if part_revision is None or part_revision.assembly is None or part_revision.assembly.subparts.count() == 0:
@@ -416,44 +425,40 @@ class PartRevision(models.Model):
                 for sp in part_revision.assembly.subparts.all():
                     qty = sp.count
                     reference = sp.reference
-                    indented_given_bom(bom, sp.part_revision, parent_id=bom_id, parent=part_revision, qty=qty, parent_qty=parent_qty,
+                    indented_given_bom(bom, sp.part_revision, parent_id=bom_item_id, parent=part_revision, qty=qty, parent_qty=parent_qty,
                                        indent_level=indent_level, subpart=sp, reference=reference, do_not_load=sp.do_not_load)
 
-        bom = []
+        bom = PartBom(part_revision=self, quantity=top_level_quantity)
         indented_given_bom(bom, self)
 
-        # For each indent level, sort by reference, if no reference then use part number.
-        # Note that need to convert part number to a list so can be compared with the 
-        # list-ified string returned by prep_for_sorting_nicely.
-        # def sort_by_reference(p):
-        #     return prep_for_sorting_nicely(p['reference']) if p['reference'] else p.__str__().split()
-        #
-        # def sort_by_indent_level(p):
-        #     return p['indent_level']
-        #
-        # bom = sorted(bom, key=sort_by_reference)
-        # bom = sorted(bom, key=sort_by_indent_level)
         return bom
 
-    def flat(self, extended_quantity=100, sort=True):
+    def flat(self, top_level_quantity=100, sort=False):
         def flat_given_bom(bom, part_revision, parent=None, qty=1, parent_qty=1, subpart=None, reference=''):
-            if part_revision is None:  # hopefully this never happens
-                logger.warning("Flat bom part_revision is None, this shouldn't happen, parent "
-                               "part_revision id: {}".format(parent.id))
-                return
+            extended_quantity = parent_qty * qty
+            total_extended_quantity = top_level_quantity * extended_quantity
 
-            if part_revision.id in bom:
-                bom[part_revision.id]['quantity'] += parent_qty * qty
-                ref = ', ' + reference if reference != '' else ''
-                bom[part_revision.id]['references'] += ref
-            else:
-                bom[part_revision.id] = {
-                    'part': part_revision.part,
-                    'seller_part': part_revision.part.optimal_seller(quantity=extended_quantity * qty),
-                    'part_revision': part_revision,
-                    'quantity': qty * parent_qty,
-                    'references': reference,
-                }
+            try:
+                seller_part = part_revision.part.optimal_seller(quantity=total_extended_quantity)
+            except AttributeError:
+                seller_part = None
+
+            try:
+                do_not_load = subpart.do_not_load
+            except AttributeError:
+                do_not_load = False
+
+            bom_item_id = str(part_revision.id) + '-dnl' if do_not_load else str(part_revision.id)
+            bom.append_item_and_update(PartBomItem(
+                bom_id=bom_item_id,
+                part=part_revision.part,
+                part_revision=part_revision,
+                do_not_load=do_not_load,
+                references=reference,
+                quantity=qty,
+                extended_quantity=extended_quantity,
+                seller_part=seller_part,
+            ))
 
             if part_revision is None or part_revision.assembly is None or part_revision.assembly.subparts.count() == 0:
                 return
@@ -462,20 +467,19 @@ class PartRevision(models.Model):
                 for sp in part_revision.assembly.subparts.all():
                     qty = sp.count
                     reference = sp.reference
-                    flat_given_bom(bom, sp.part_revision, parent=part_revision, qty=qty, parent_qty=parent_qty,
-                                   subpart=sp, reference=reference)
+                    flat_given_bom(bom, sp.part_revision, parent=part_revision, qty=qty, parent_qty=parent_qty, subpart=sp, reference=reference)
 
-        bom = {}
-        flat_given_bom(bom, self)
+        flat_bom = PartBom(part_revision=self, quantity=top_level_quantity)
+        flat_given_bom(flat_bom, self)
 
         # Sort by references, if no references then use part number.
         # Note that need to convert part number to a list so can be compared with the 
         # list-ified string returned by prep_for_sorting_nicely.
         def sort_by_references(p):
-            return prep_for_sorting_nicely(p['references']) if p['references'] else p.__str__().split()
+            return prep_for_sorting_nicely(p.references) if p.references else p.__str__().split()
         if sort:
-            bom = sorted(bom.values(), key=sort_by_references)
-        return bom
+            flat_bom.parts = sorted(flat_bom.parts.values(), key=sort_by_references)
+        return flat_bom
 
     def where_used(self):
         # Where is a part_revision used???
@@ -538,22 +542,17 @@ class Assembly(models.Model):
     subparts = models.ManyToManyField(Subpart, related_name='assemblies', through='AssemblySubparts')
 
 
-class ManufacturerPart(models.Model):
+class ManufacturerPart(models.Model, AsDictModel):
     part = models.ForeignKey(Part, on_delete=models.CASCADE, db_index=True)
     manufacturer_part_number = models.CharField(max_length=128, default='', blank=True)
     manufacturer = models.ForeignKey(Manufacturer, default=None, blank=True, null=True, on_delete=models.PROTECT)
-    source_mouser = models.BooleanField(default=False)
+    mouser_disable = models.BooleanField(default=False)
 
     class Meta:
         unique_together = [
             'part',
             'manufacturer_part_number',
             'manufacturer']
-
-        index_together = [
-            'part',
-            'source_mouser'
-        ]
 
     def seller_parts(self):
         return SellerPart.objects.filter(manufacturer_part=self).order_by('seller', 'minimum_order_quantity')
@@ -569,7 +568,7 @@ class ManufacturerPart(models.Model):
         return u'%s' % (self.manufacturer_part_number)
 
 
-class Seller(models.Model):
+class Seller(models.Model, AsDictModel):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     name = models.CharField(max_length=128, default=None)
 
@@ -577,7 +576,7 @@ class Seller(models.Model):
         return u'%s' % (self.name)
 
 
-class SellerPart(models.Model):
+class SellerPart(models.Model, AsDictModel):
     seller = models.ForeignKey(Seller, on_delete=models.CASCADE)
     manufacturer_part = models.ForeignKey(ManufacturerPart, on_delete=models.CASCADE)
     minimum_order_quantity = models.PositiveIntegerField(default=1)
@@ -609,6 +608,12 @@ class SellerPart(models.Model):
                 if new_total_cost < old_total_cost:
                     seller = sellerpart
         return seller
+
+    def order_quantity(self, extended_quantity):
+        order_qty = extended_quantity
+        if self.minimum_order_quantity is not None and extended_quantity > self.minimum_order_quantity:
+            order_qty = ceil(extended_quantity / float(self.minimum_order_quantity)) * self.minimum_order_quantity
+        return order_qty
 
     def __str__(self):
         return u'%s' % (self.manufacturer_part.part.full_part_number() + ' ' + self.seller.name)

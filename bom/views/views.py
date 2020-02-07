@@ -21,13 +21,13 @@ from social_django.models import UserSocialAuth
 from functools import reduce
 
 from json import loads, dumps
-from math import ceil
 
 from bom.models import Part, PartClass, Subpart, SellerPart, Organization, Manufacturer, ManufacturerPart, User, \
     UserMeta, PartRevision, Assembly, AssemblySubparts
 from bom.forms import PartInfoForm, PartForm, AddSubpartForm, SubpartForm, FileForm, AddSellerPartForm, ManufacturerForm, \
     ManufacturerPartForm, SellerPartForm, UserForm, UserMetaForm, UserAddForm, OrganizationForm, NumberItemLenForm, PartRevisionForm, \
-    PartRevisionNewForm, PartCSVForm, PartClassForm, PartClassSelectionForm, PartClassCSVForm, UploadBOMForm, BOMCSVForm
+    PartRevisionNewForm, PartCSVForm, PartClassForm, PartClassSelectionForm, PartClassCSVForm, UploadBOMForm, BOMCSVForm, PartClassFormSet, \
+    OrganizationCreateForm
 from bom.utils import listify_string, stringify_list, check_references_for_duplicates, prep_for_sorting_nicely
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,11 @@ logger = logging.getLogger(__name__)
 @login_required
 def home(request):
     profile = request.user.bom_profile()
-    organization = profile.get_or_create_organization()
+    organization = profile.organization
+    print(profile, organization)
+    if not organization:
+        return HttpResponseRedirect(reverse('bom:organization-create'))
+
     query = request.POST.get('q', '')
     title = f'{organization.name}\'s'
 
@@ -191,6 +195,36 @@ def home(request):
     return TemplateResponse(request, 'bom/dashboard.html', locals())
 
 
+@login_required()
+def organization_create(request):
+    user = request.user
+    profile = user.bom_profile()
+
+    if user.first_name == '' and user.last_name == '':
+        org_name = user.username
+    else:
+        org_name = user.first_name + ' ' + user.last_name
+
+    form = OrganizationCreateForm(initial={'name': org_name})
+    if request.method == 'POST':
+        form = OrganizationCreateForm(request.POST)
+        form.is_valid()
+        print(form.cleaned_data)
+        if form.cleaned_data['number_scheme'] == 'I':
+            form.cleaned_data['number_item_len'] = 128
+            print('updated cleaned data')
+        print(form.cleaned_data)
+        if form.is_valid():
+            organization = form.save(commit=False)
+            organization.owner = user
+            organization.subscription = 'F'
+            organization.save()
+            profile.organization = organization
+            profile.save()
+            return HttpResponseRedirect(reverse('bom:home'))
+    return TemplateResponse(request, 'bom/organization-create.html', locals())
+
+
 @login_required
 def search_help(request):
     return TemplateResponse(request, 'bom/search-help.html', locals())
@@ -214,7 +248,6 @@ def bom_settings(request, tab_anchor=None):
     profile = user.bom_profile()
     organization = profile.organization
     title = 'Settings'
-    action = reverse('bom:settings')
     owner = organization.owner
     name = 'settings'
 
@@ -238,6 +271,8 @@ def bom_settings(request, tab_anchor=None):
     INDABOM_TAB = 'indabom'
 
     if request.method == 'POST':
+        part_class_action_ids = request.POST.getlist('actions')
+        part_class_action = request.POST.get('part-class-action')
         if 'submit-edit-user' in request.POST:
             tab_anchor = USER_TAB
             user_form = UserForm(request.POST, instance=user)
@@ -317,7 +352,7 @@ def bom_settings(request, tab_anchor=None):
             tab_anchor = INDABOM_TAB
             part_class_form = PartClassForm()
 
-        elif 'submit-part-class-upload' in request.POST and request.FILES['file'] is not None:
+        elif 'submit-part-class-upload' in request.POST and request.FILES.get('file') is not None:
             tab_anchor = INDABOM_TAB
             part_class_csv_form = PartClassCSVForm(request.POST, request.FILES, organization=organization)
             if part_class_csv_form.is_valid():
@@ -327,19 +362,23 @@ def bom_settings(request, tab_anchor=None):
                     messages.warning(request, warning)
             else:
                 messages.error(request, part_class_csv_form.errors)
-
-        elif 'submit-part-class-delete' in request.POST:
-            tab_anchor = INDABOM_TAB
-            for item in request.POST:
-                if 'delete_part_class_id_' in item:
-                    part_class_id = item.partition('delete_part_class_id_')[2]
-                    try:
-                        part_class = PartClass.objects.get(id=part_class_id, organization=organization)
-                        part_class.delete()
-                    except PartClass.DoesNotExist:
-                        messages.error(request, "No part class found with given id {}.".format(part_class_id))
-                    except ProtectedError:
-                        messages.error(request, "Cannot delete part class {} because it has parts. You must delete those parts first.".format(part_class))
+        elif 'part-class-action' in request.POST and part_class_action is not None:
+            if len(part_class_action_ids) <= 0:
+                messages.warning(request, "No action was taken because no part classes were selected. Select part classes by checking the checkboxes below.")
+            elif part_class_action == 'submit-part-class-enable-mouser':
+                tab_anchor = INDABOM_TAB
+                PartClass.objects.filter(id__in=part_class_action_ids).update(mouser_enabled=True)
+            elif part_class_action == 'submit-part-class-disable-mouser':
+                tab_anchor = INDABOM_TAB
+                PartClass.objects.filter(id__in=part_class_action_ids).update(mouser_enabled=False)
+            elif part_class_action == 'submit-part-class-delete':
+                tab_anchor = INDABOM_TAB
+                try:
+                    PartClass.objects.filter(id__in=part_class_action_ids).delete()
+                except PartClass.DoesNotExist as err:
+                    messages.error(request, f"No part class found: {err}")
+                except ProtectedError as err:
+                    messages.error(request, f"Cannot delete a part class because it has parts. You must delete those parts first. {err}")
 
     return TemplateResponse(request, 'bom/settings.html', locals())
 
@@ -374,7 +413,6 @@ def user_meta_edit(request, user_meta_id):
 
 @login_required
 def part_info(request, part_id, part_revision_id=None):
-    order_by = request.GET.get('order_by', 'indented')
     tab_anchor = request.GET.get('tab_anchor', None)
 
     user = request.user
@@ -398,7 +436,7 @@ def part_info(request, part_id, part_revision_id=None):
 
     if part.organization != organization:
         messages.error(request, "Can't access a part that is not yours!")
-        return HttpResponseRedirect(reverse('bom:error'))
+        return HttpResponseRedirect(reverse('bom:home'))
 
     qty_cache_key = str(part_id) + '_qty'
     qty = cache.get(qty_cache_key, 100)
@@ -418,85 +456,32 @@ def part_info(request, part_id, part_revision_id=None):
     cache.set(qty_cache_key, qty, timeout=None)
 
     try:
-        parts = part_revision.indented()
+        indented_bom = part_revision.indented(top_level_quantity=qty)
     except RuntimeError:
         messages.error(request, "Error: infinite recursion in part relationship. Contact info@indabom.com to resolve.")
-        parts = []
-    except AttributeError:
-        parts = []
+        indented_bom = []
+    except AttributeError as err:
+        messages.error(request, err)
+        indented_bom = []
 
     try:
-        parts_flat = part_revision.flat(extended_quantity=qty)
-    except AttributeError:
-        parts_flat = []
-
-    extended_cost_complete = True
-    unit_cost = 0
-    unit_nre = 0
-    unit_out_of_pocket_cost = 0
-    references_seen = set()
-    duplicate_references = set()
-    for item in parts:
-        check_references_for_duplicates(item['reference'], references_seen, duplicate_references)
-
-        extended_quantity = int(qty) * item['total_quantity']
-        item['extended_quantity'] = extended_quantity
-
-        subpart = item['part']
-
-        seller = subpart.optimal_seller(quantity=extended_quantity)
-        order_qty = extended_quantity
-        if seller is not None and seller.minimum_order_quantity is not None and extended_quantity > seller.minimum_order_quantity:
-            order_qty = ceil(extended_quantity / float(seller.minimum_order_quantity)) * seller.minimum_order_quantity
-
-        item['seller_price'] = seller.unit_cost if seller is not None else 0
-        item['seller_nre'] = seller.nre_cost if seller is not None else 0
-        item['seller_part'] = seller
-        item['seller_moq'] = seller.minimum_order_quantity if seller is not None else 0
-        item['order_quantity'] = order_qty
-
-        # then extend that price
-        item['extended_cost'] = extended_quantity * \
-                                seller.unit_cost if seller is not None and seller.unit_cost is not None and extended_quantity is not None else None
-        item['out_of_pocket_cost'] = order_qty * \
-                                     float(seller.unit_cost) if seller is not None and seller.unit_cost is not None else 0
-
-        unit_cost = (
-                unit_cost +
-                seller.unit_cost *
-                item['quantity']) if seller is not None and seller.unit_cost is not None else unit_cost
-        unit_out_of_pocket_cost = unit_out_of_pocket_cost + \
-                                  item['out_of_pocket_cost']
-        unit_nre = (
-                unit_nre +
-                item['seller_nre']) if item['seller_nre'] is not None else unit_nre
-        if seller is None:
-            extended_cost_complete = False
-
-    # seller_price, seller_nre
-
-    extended_cost = unit_cost * int(qty)
-    total_out_of_pocket_cost = unit_out_of_pocket_cost + float(unit_nre)
-
-    # if len(duplicate_references) > 0:
-    #     sorted_duplicate_references = sorted(duplicate_references, key=prep_for_sorting_nicely)
-    #     messages.warning(request, "Warning: The following BOM references are associated with multiple parts: " + str(sorted_duplicate_references))
+        flat_bom = part_revision.flat(top_level_quantity=qty)
+    except AttributeError as err:
+        messages.error(request, err)
+        flat_bom = []
 
     try:
         where_used = part_revision.where_used()
     except AttributeError:
         where_used = []
 
+    try:
+        mouser_parts = len(flat_bom.mouser_parts().keys()) > 0
+    except AttributeError:
+        mouser_parts = False
+
     where_used_part = part.where_used()
     seller_parts = part.seller_parts()
-
-    if order_by != 'defaultOrderField' and order_by != 'indented':
-        # tab_anchor = 'bom'
-        parts = sorted(parts, key=lambda k: k[order_by], reverse=True)
-    # elif order_by == 'indented':
-    #     # anchor = 'bom'
-    #     tab_anchor = None
-
     return TemplateResponse(request, 'bom/part-info.html', locals())
 
 
@@ -514,94 +499,25 @@ def part_export_bom(request, part_id=None, part_revision_id=None):
         part = part_revision.part
     else:
         messages.error(request, "View requires part or part revision.")
-        return HttpResponseRedirect(reverse('bom:error'))
+        return HttpResponseRedirect(request.META.get('HTTP_REFERER'), '/')
 
     if part.organization != organization:
         messages.error(request, "Cant export a part that is not yours!")
-        return HttpResponseRedirect(reverse('bom:error'))
+        return HttpResponseRedirect(request.META.get('HTTP_REFERER'), '/')
 
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="{}_indabom_parts_indented.csv"'.format(
         part.full_part_number())
 
-    bom = part_revision.indented()
-
     qty_cache_key = str(part_id) + '_qty'
     qty = cache.get(qty_cache_key, 1000)
 
-    fieldnames = [
-        'level',
-        'part_number',
-        'quantity',
-        'part_class',
-        'reference',
-        'do_not_load',
-        'part_synopsis',
-        'part_revision',
-        'part_manufacturer',
-        'part_manufacturer_part_number',
-        'part_ext_qty',
-        'part_order_qty',
-        'part_seller',
-        'part_cost',
-        'part_moq',
-        'part_ext_cost',
-        'part_out_of_pocket_cost',
-        'part_nre',
-        'part_lead_time_days', ]
-
-    writer = csv.DictWriter(response, fieldnames=fieldnames)
+    bom = part_revision.indented(top_level_quantity=qty)
+    headers = list(bom.parts.items())[0][1].as_dict_for_export().keys()
+    writer = csv.DictWriter(response, fieldnames=headers)
     writer.writeheader()
-    for item in bom:
-        extended_quantity = int(qty) * item['total_quantity']
-        item['extended_quantity'] = extended_quantity
-
-        subpart = item['part']
-        seller = subpart.optimal_seller(quantity=extended_quantity)
-        order_qty = extended_quantity
-        if seller is not None and seller.minimum_order_quantity is not None and extended_quantity > seller.minimum_order_quantity:
-            order_qty = ceil(extended_quantity / float(seller.minimum_order_quantity)) * seller.minimum_order_quantity
-
-        item['seller_price'] = seller.unit_cost if seller is not None else 0
-        item['seller_nre'] = seller.nre_cost if seller is not None else 0
-        item['seller_part'] = seller
-        item['seller_moq'] = seller.minimum_order_quantity if seller is not None else 0
-        item['order_quantity'] = order_qty
-        item['seller_lead_time_days'] = seller.lead_time_days if seller is not None else 0
-
-        # then extend that price
-        item['extended_cost'] = extended_quantity * \
-                                seller.unit_cost if seller is not None and seller.unit_cost is not None and extended_quantity is not None else None
-        item['out_of_pocket_cost'] = order_qty * \
-                                     float(
-                                         seller.unit_cost) if seller is not None and seller.unit_cost is not None else 0
-
-        row = {
-            'level': item['indent_level'],
-            'part_number': item['part'].full_part_number(),
-            'quantity': item['quantity'],
-            'part_class': item['part'].number_class.name,
-            'reference': item['reference'],
-            'do_not_load': item['do_not_load'],
-            'part_synopsis': item['part_revision'].synopsis(),
-            'part_revision': item['part_revision'].revision,
-            'part_manufacturer': item['part'].primary_manufacturer_part.manufacturer.name if item[
-                                                                                                 'part'].primary_manufacturer_part is not None and
-                                                                                             item[
-                                                                                                 'part'].primary_manufacturer_part.manufacturer is not None else '',
-            'part_manufacturer_part_number': item['part'].primary_manufacturer_part.manufacturer_part_number if item[
-                                                                                                                    'part'].primary_manufacturer_part is not None else '',
-            'part_ext_qty': item['extended_quantity'],
-            'part_order_qty': item['order_quantity'],
-            'part_seller': item['seller_part'].seller.name if item['seller_part'] is not None else '',
-            'part_cost': item['seller_price'] if item['seller_price'] is not None else 0,
-            'part_moq': item['seller_moq'] if item['seller_moq'] is not None else 0,
-            'part_ext_cost': item['extended_cost'] if item['extended_cost'] is not None else 0,
-            'part_out_of_pocket_cost': item['out_of_pocket_cost'],
-            'part_nre': item['seller_nre'] if item['seller_nre'] is not None else 0,
-            'part_lead_time_days': item['seller_lead_time_days'],
-        }
-        writer.writerow({k: smart_str(v) for k, v in row.items()})
+    for _, item in bom.parts.items():
+        writer.writerow({k: smart_str(v) for k, v in item.as_dict_for_export().items()})
     return response
 
 
@@ -615,81 +531,24 @@ def part_export_bom_flat(request, part_revision_id):
 
     if part_revision.part.organization != organization:
         messages.error(request, "Cant export a part that is not yours!")
-        return HttpResponseRedirect(reverse('bom:error'))
+        return HttpResponseRedirect(request.META.get('HTTP_REFERER'), '/')
 
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="{}_indabom_parts_flat.csv"'.format(
         part_revision.part.full_part_number())
 
-    bom = part_revision.flat()
-
     # As compared to indented bom, show all references for a subpart as a single item and
     # don't show do_not_load status at all because it won't be clear as to which subpart reference
     # the do_not_load refers to.
-    fieldnames = [
-        'part_number',
-        'quantity',
-        'part_class',
-        'references',
-        'part_synopsis',
-        'part_revision',
-        'part_manufacturer',
-        'part_manufacturer_part_number',
-        'part_ext_qty',
-        'part_order_qty',
-        'part_seller',
-        'part_cost',
-        'part_moq',
-        'part_ext_cost',
-        'part_out_of_pocket_cost',
-        'part_nre',
-        'part_lead_time_days', ]
-
     qty_cache_key = str(part_revision.part.id) + '_qty'
     qty = cache.get(qty_cache_key, 1000)
 
-    writer = csv.DictWriter(response, fieldnames=fieldnames)
+    bom = part_revision.flat(top_level_quantity=qty)
+    headers = list(bom.parts.items())[0][1].as_dict_for_export().keys()
+    writer = csv.DictWriter(response, fieldnames=headers)
     writer.writeheader()
-    for item in bom:
-        extended_quantity = int(qty) * item['quantity']
-        subpart = item['part']
-        seller = subpart.optimal_seller(quantity=extended_quantity)
-        order_qty = extended_quantity
-        if seller is not None and seller.minimum_order_quantity is not None and extended_quantity > seller.minimum_order_quantity:
-            order_qty = ceil(extended_quantity / float(seller.minimum_order_quantity)) * seller.minimum_order_quantity
-
-        item['seller_price'] = seller.unit_cost if seller is not None else 0
-        item['seller_nre'] = seller.nre_cost if seller is not None else 0
-        item['seller_part'] = seller
-        item['seller_moq'] = seller.minimum_order_quantity if seller is not None else 0
-        item['order_quantity'] = order_qty
-        item['seller_lead_time_days'] = seller.lead_time_days if seller is not None else 0
-
-        # then extend that price
-        item['extended_cost'] = extended_quantity * seller.unit_cost if seller is not None and seller.unit_cost is not None and extended_quantity is not None else None
-        item['out_of_pocket_cost'] = order_qty * float(
-            seller.unit_cost) if seller is not None and seller.unit_cost is not None else 0
-
-        row = {
-            'part_number': item['part'].full_part_number(),
-            'quantity': item['quantity'],
-            'part_class': item['part'].number_class.name,
-            'references': item['references'],
-            'part_synopsis': item['part_revision'].synopsis(),
-            'part_revision': item['part_revision'].revision,
-            'part_manufacturer': item['part'].primary_manufacturer_part.manufacturer.name if item['part'].primary_manufacturer_part is not None and
-                                                                                             item['part'].primary_manufacturer_part.manufacturer is not None else '',
-            'part_manufacturer_part_number': item['part'].primary_manufacturer_part.manufacturer_part_number if item['part'].primary_manufacturer_part is not None else '',
-            'part_order_qty': item['order_quantity'],
-            'part_seller': item['seller_part'].seller.name if item['seller_part'] is not None else '',
-            'part_cost': item['seller_price'] if item['seller_price'] is not None else 0,
-            'part_moq': item['seller_moq'] if item['seller_moq'] is not None else 0,
-            'part_ext_cost': item['extended_cost'] if item['extended_cost'] is not None else 0,
-            'part_out_of_pocket_cost': item['out_of_pocket_cost'],
-            'part_nre': item['seller_nre'] if item['seller_nre'] is not None else 0,
-            'part_lead_time_days': item['seller_lead_time_days'],
-        }
-        writer.writerow({k: smart_str(v) for k, v in row.items()})
+    for _, item in bom.parts.items():
+        writer.writerow({k: smart_str(v) for k, v in item.as_dict_for_export().items()})
     return response
 
 
@@ -729,7 +588,7 @@ def part_upload_bom(request, part_id):
         parent_part = Part.objects.get(id=part_id)
     except Part.DoesNotExist:
         messages.error(request, "No part found with given part_id {}.".format(part_id))
-        return HttpResponseRedirect(reverse('bom:error'))
+        return HttpResponseRedirect(request.META.get('HTTP_REFERER'), '/')
 
     if request.method == 'POST' and request.FILES['file'] is not None:
         bom_csv_form = BOMCSVForm(request.POST, request.FILES, parent_part=parent_part, organization=organization)
@@ -829,6 +688,7 @@ def create_part(request):
         manufacturer_form = ManufacturerForm(request.POST)
         manufacturer_part_form = ManufacturerPartForm(request.POST, organization=organization)
         part_revision_form = PartRevisionForm(request.POST)
+        # Checking if part form is valid checks for number uniqueness
         if part_form.is_valid() and manufacturer_form.is_valid() and manufacturer_part_form.is_valid():
             mpn = manufacturer_part_form.cleaned_data['manufacturer_part_number']
             old_manufacturer = manufacturer_part_form.cleaned_data['manufacturer']
@@ -847,16 +707,7 @@ def create_part(request):
                 messages.warning(request, "No manufacturer was selected or created, no manufacturer part number was assigned.")
             new_part = part_form.save(commit=False)
             new_part.organization = organization
-            try:
-                new_part.assign_part_number()
-                # Check uniqueness of part number NOT including the number revision. Want
-                # to make sure that the part does not exist at all, as such, whether or not
-                # is has revisions is not relevant.
-                Part.objects.get(number_class=new_part.number_class, number_item=new_part.number_item)
-                messages.error(request, "Error! Already created a part with part number {0}-{1}-VV".format(new_part.number_class.code, new_part.number_item))
-                return TemplateResponse(request, 'bom/create-part.html', locals())
-            except Part.DoesNotExist:
-                pass
+
             if part_revision_form.is_valid():
                 # Save the Part before the PartRevision, as this will again check for part
                 # number uniqueness. This way if someone else(s) working concurrently is also
@@ -866,28 +717,24 @@ def create_part(request):
                     pr = part_revision_form.save(commit=False)
                     pr.part = new_part  # Associate PartRevision with Part
                     pr.save()
-                except IntegrityError:
-                    messages.error(request, "Error! Already created a part with part number {0}-{1}-VV".format(new_part.number_class.code, new_part.number_item))
+                except IntegrityError as err:
+                    messages.error(request, "Error! Already created a part with part number {0}-{1}-{3}}".format(new_part.number_class.code, new_part.number_item, new_part.number_variation))
                     return TemplateResponse(request, 'bom/create-part.html', locals())
             else:
                 messages.error(request, part_revision_form.errors)
                 return TemplateResponse(request, 'bom/create-part.html', locals())
 
             manufacturer_part = None
-            if manufacturer is None:
-                manufacturer, created = Manufacturer.objects.get_or_create(organization=organization, name='')
+            if manufacturer is not None:
+                manufacturer_part, created = ManufacturerPart.objects.get_or_create(
+                    part=new_part,
+                    manufacturer_part_number='' if mpn == '' else mpn,
+                    manufacturer=manufacturer)
 
-            manufacturer_part, created = ManufacturerPart.objects.get_or_create(
-                part=new_part,
-                manufacturer_part_number='' if mpn == '' else mpn,
-                manufacturer=manufacturer)
-
-            new_part.primary_manufacturer_part = manufacturer_part
-            new_part.save()
+                new_part.primary_manufacturer_part = manufacturer_part
+                new_part.save()
 
             return HttpResponseRedirect(reverse('bom:part-info', kwargs={'part_id': str(new_part.id)}))
-        else:
-            part_revision_form = PartRevisionForm(request.POST)
     else:
         # Initialize organization in the form's model and in the form itself:
         part_form = PartForm(initial={'organization': organization}, organization=organization)
@@ -934,32 +781,26 @@ def manage_bom(request, part_id, part_revision_id):
 
     if part.organization != organization:
         messages.error(request, "Cant access a part that is not yours!")
-        return HttpResponseRedirect(reverse('bom:error'))
+        return HttpResponseRedirect(request.META.get('HTTP_REFERER'), '/')
 
     add_subpart_form = AddSubpartForm(initial={'count': 1, }, organization=organization, part_id=part_id)
     upload_subparts_csv_form = FileForm()
 
-    parts = part_revision.indented()
-
     qty_cache_key = str(part_id) + '_qty'
     qty = cache.get(qty_cache_key, 100)
+
+    indented_bom = part_revision.indented(top_level_quantity=qty)
 
     references_seen = set()
     duplicate_references = set()
     for sp in part_revision.assembly.subparts.all():
         check_references_for_duplicates(sp.reference, references_seen, duplicate_references)
 
-    for item in parts:
-        extended_quantity = int(qty) * int(item['total_quantity'])
-        seller = item['part'].optimal_seller(quantity=extended_quantity)
-        item['seller_price'] = seller.unit_cost if seller is not None else None
-        item['seller_part'] = seller
-
     if len(duplicate_references) > 0:
         sorted_duplicate_references = sorted(duplicate_references, key=prep_for_sorting_nicely)
         messages.warning(request, "Warning: The following BOM references are associated with multiple parts: " + str(sorted_duplicate_references))
 
-    return TemplateResponse(request, 'bom/part-rev-manage-bom.html', locals())
+    return TemplateResponse(request, 'bom/part-revision-manage-bom.html', locals())
 
 
 @login_required
@@ -972,7 +813,7 @@ def part_delete(request, part_id):
         part = Part.objects.get(id=part_id)
     except Part.DoesNotExist:
         messages.error(request, "No part found with given part_id {}.".format(part_id))
-        return HttpResponseRedirect(reverse('bom:error'))
+        return HttpResponseRedirect(request.META.get('HTTP_REFERER'), '/')
 
     part.delete()
 

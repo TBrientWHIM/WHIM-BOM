@@ -19,6 +19,8 @@ class TestBOM(TransactionTestCase):
             'kasper', 'kasper@McFadden.com', 'ghostpassword')
         self.organization = create_a_fake_organization(self.user)
         self.profile = self.user.bom_profile(organization=self.organization)
+        self.profile.role = 'A'
+        self.profile.save()
 
     def test_home(self):
         self.client.login(username='kasper', password='ghostpassword')
@@ -232,6 +234,61 @@ class TestBOM(TransactionTestCase):
         occurances = [m.start() for m in finditer(p1.full_part_number(), response.content.decode('utf-8'))]
         self.assertEqual(len(occurances), 1)
 
+    def test_create_part_variation(self):
+        self.client.login(username='kasper', password='ghostpassword')
+
+        (p1, p2, p3, p4) = create_some_fake_parts(organization=self.organization)
+
+        new_part_mpn = 'STM32F401-NEW-PART'
+        new_part_form_data = {
+            'manufacturer_part_number': new_part_mpn,
+            'manufacturer': p1.primary_manufacturer_part.manufacturer.id,
+            'number_class': p1.number_class.id,
+            'number_item': '2000',
+            'number_variation': '01',
+            'configuration': 'W',
+            'description': 'IC, MCU 32 Bit',
+            'revision': 'A',
+            'attribute': '',
+            'value': ''
+        }
+
+        response = self.client.post(reverse('bom:create-part'), new_part_form_data)
+        new_part_form_data['number_variation'] = '02'
+        response = self.client.post(reverse('bom:create-part'), new_part_form_data)
+        # Part should be created because the variation is different, redirect means part was created
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue('/part/' in response.url)
+
+        response = self.client.post(reverse('bom:create-part'), new_part_form_data)
+        # Part should NOT be created because the variation is the same, 200 means error
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue('error' in str(response.content))
+        self.assertTrue('already in use' in str(response.content))
+
+    def test_create_part_no_manufacturer_part(self):
+        self.client.login(username='kasper', password='ghostpassword')
+
+        (p1, p2, p3, p4) = create_some_fake_parts(organization=self.organization)
+
+        new_part_mpn = 'STM32F401-NEW-PART'
+        new_part_form_data = {
+            'manufacturer_part_number': '',
+            'manufacturer': '',
+            'number_class': p1.number_class.id,
+            'number_item': '2000',
+            'number_variation': '01',
+            'configuration': 'W',
+            'description': 'IC, MCU 32 Bit',
+            'revision': 'A',
+            'attribute': '',
+            'value': ''
+        }
+
+        response = self.client.post(reverse('bom:create-part'), new_part_form_data)
+        part = Part.objects.filter(number_class=p1.number_class.id, number_item='2000', number_variation='01').first()
+        self.assertEqual(len(part.manufacturer_parts()), 0)
+
     def test_part_edit(self):
         self.client.login(username='kasper', password='ghostpassword')
 
@@ -275,10 +332,11 @@ class TestBOM(TransactionTestCase):
         repeat_part_revision = p2.latest()
         parts_p2 = 0
         qty_p2 = 0
-        for p in p3.latest().indented():
-            if p['part_revision'] == repeat_part_revision:
+        indented_bom = p3.latest().indented()
+        for _, p in indented_bom.parts.items():
+            if p.part_revision == repeat_part_revision:
                 parts_p2 += 1
-                qty_p2 = p['quantity']
+                qty_p2 = p.quantity
         self.assertEqual(1, parts_p2)
         self.assertEqual(7, qty_p2)
 
@@ -292,13 +350,14 @@ class TestBOM(TransactionTestCase):
         parts_p2 = 0
         qty_p2_load = 0
         qty_p2_do_not_load = 0
-        for p in p3.latest().indented():
-            if p['part_revision'] == repeat_part_revision:
+        indented_bom = p3.latest().indented()
+        for _, p in indented_bom.parts.items():
+            if p.part_revision == repeat_part_revision:
                 parts_p2 += 1
-            if p['part_revision'] == repeat_part_revision and p['do_not_load']:
-                qty_p2_do_not_load += p['quantity']
-            elif p['part_revision'] == repeat_part_revision:
-                qty_p2_load += p['quantity']
+            if p.part_revision == repeat_part_revision and p.do_not_load:
+                qty_p2_do_not_load += p.quantity
+            elif p.part_revision == repeat_part_revision:
+                qty_p2_load += p.quantity
 
         self.assertEqual(2, parts_p2)
         self.assertEqual(3, qty_p2_do_not_load)
@@ -367,6 +426,29 @@ class TestBOM(TransactionTestCase):
 
         new_part_class_count = PartClass.objects.all().count()
         self.assertEqual(new_part_class_count, 37)
+
+        # Should not hit 500 errors on anything below
+        # Submit with no file
+        response = self.client.post(reverse('bom:settings'), {'submit-part-class-upload': ''})
+        self.assertEqual(response.status_code, 200)
+
+        # Submit with blank header and comments
+        with open('bom/test_files/test_part_classes_no_comment.csv') as test_csv:
+            response = self.client.post(reverse('bom:settings'), {'file': test_csv, 'submit-part-class-upload': ''})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue('Part class 102 Resistor on row 3 is already defined. Uploading of this part class skipped.' in str(response.content))
+
+        # Submit with a weird csv file that sort of works
+        with open('bom/test_files/test_part_classes_blank_rows.csv') as test_csv:
+            response = self.client.post(reverse('bom:settings'), {'file': test_csv, 'submit-part-class-upload': ''})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue('Part class &#39;code&#39; in row 3 must be a positive number. Uploading of this part class skipped.' in str(response.content))
+        self.assertTrue('Part class &#39;code&#39; in row 4 must be a positive number. Uploading of this part class skipped.' in str(response.content))
+
+    def test_edit_user_meta(self):
+        self.client.login(username='kasper', password='ghostpassword')
+        response = self.client.post(reverse('bom:user-meta-edit', kwargs={'user_meta_id': self.user.bom_profile().id}))
+        self.assertEqual(response.status_code, 200)
 
     def test_add_sellerpart(self):
         self.client.login(username='kasper', password='ghostpassword')

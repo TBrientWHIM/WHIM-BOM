@@ -6,7 +6,7 @@
 {% block head-title %}{{ title }}{% endblock %}
 
 {% block main %}
-    <link rel="stylesheet" type="text/css" href="{% static 'bom/style.css' %}"/>
+    <link rel="stylesheet" type="text/css" href="{% static 'bom/css/style.css' %}"/>
     <link rel="stylesheet" type="text/css" href="{% static 'bom/css/jquery.treetable.css' %}"/>
     <link rel="stylesheet" type="text/css" href="{% static 'bom/treetable-theme.css' %}"/>
     {{ add_subpart_form.media }}
@@ -22,7 +22,7 @@
         <div id="bom" class="col s12">
             <br><h5>Modify Subparts</h5>
 
-            {% include 'bom/bom-indented.html' with order_by='indented' manage=1 parts=parts part=part part_revision=part_revision profile=profile %}
+            {% include 'bom/bom-indented.html' with order_by='indented' manage=1 bom_items=indented_bom.parts part=part part_revision=part_revision profile=profile %}
 
             <br><h5>Add Subpart</h5>
             <div class="row">
@@ -31,7 +31,7 @@
                     {% csrf_token %}
                     {{ add_subpart_form.subpart_part_number|materializecss:'m4 s12' }}
                     {{ add_subpart_form.count|materializecss:'m1 s12' }}
-                    {{ add_subpart_form.do_not_load|materializecss:'m2 s12' }}
+                    {{ add_subpart_form.do_not_load|materializecss:'m2 s12 input-field materialize-checkbox-padding' }}
                     {{ add_subpart_form.reference|materializecss:'m4 s12' }}
                     <div class="fieldWrapper">
                         <button class="waves-effect waves-light btn green lighten-1" type="submit" name="action">add

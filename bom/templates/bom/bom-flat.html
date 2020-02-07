@@ -1,7 +1,11 @@
 {# To include this widget, make sure to pass: `parts`, `order_by`, `part`, `part_revision`, `profile` variables  - TODO Could remove part if we pass part revision #}
 {% load staticfiles %}
+
 <div class="row" style="padding-top: 16px;">
     <div class="col s6">
+        <button href="#" class="waves-effect waves-green grey lighten-4 btn-flat"
+                onclick="jQuery('#flat-bom').trigger('sortReset'); return false;">Clear Sort
+        </button>
     </div>
     <div class="col s6 right-align">
         {% if manage and profile.role == 'A' %}
@@ -16,9 +20,13 @@
             </button>
             <!-- Dropdown Structure -->
             <ul id='manage-bom-{{ part.id }}-flat' class='dropdown-content'>
-                {% if profile.role == 'A' and part_revision.configuration == 'W' %}
-                    <li><a class="green-text text-lighten-1" href="{% url 'bom:part-manage-bom' part_id=part.id part_revision_id=part_revision.id %}">
+                {% if profile.role == 'A' %}
+                    <li>{% if part_revision.configuration == 'W' %}
+                        <a class="green-text text-lighten-1" href="{% url 'bom:part-manage-bom' part_id=part.id part_revision_id=part_revision.id %}">
                         <i class="material-icons green-text text-lighten-1">edit</i>Edit BOM</a>
+                        {% else %}
+                        <a class="grey-text text-lighten-1" onclick="alert('Can\'t edit a released part!')"><i class="material-icons grey-text text-lighten-1">edit</i>Edit BOM</a>
+                        {% endif %}
                     </li>
                 {% endif %}
                 {% if part_revision %}
@@ -35,14 +43,14 @@
         {% endif %}
     </div>
 </div>
-<div class="responsive-table-wrapper">
+<div class="responsive-table-wrapper" style="padding-bottom: 25px;">
     <table id="flat-bom" class="highlight part-list tight single-line">
         <thead>
         <tr>
             <th class="text-normal">Part No.</th>
             <th class="text-normal">Qty</th>
-            <th class="text-normal">Reference</th>
-            <th class="text-normal">Do Not Load</th>
+            <th class="text-normal">Refs</th>
+            <th class="text-normal">DNL</th>
             <th class="text-normal">Synopsis</th>
             <th class="text-normal">Rev</th>
             <th class="text-normal">Manufacturer</th>
@@ -55,25 +63,19 @@
             <th class="text-normal">NRE</th>
         </tr>
         </thead>
-        {% for subpart in parts %}
+        {% for bom_id, subpart in bom_items.items %}
             <tr>
                 <td class="text-normal"><a href="{% url 'bom:part-info' part_id=subpart.part.id %}">{{ subpart.part.full_part_number }}</a></td>
-                <td class="text-normal">{{ subpart.quantity }}</td>
+                <td class="text-normal">{{ subpart.extended_quantity }}</td>
                 <td class="text-normal">{{ subpart.references | default:"-" }}</td>
                 <td class="text-normal">{{ subpart.do_not_load | default:"-" }}</td>
                 <td class="text-normal">{{ subpart.part_revision.synopsis }}</td>
                 <td class="text-normal">{{ subpart.part_revision.revision }}</td>
                 <td class="text-normal">{{ subpart.part.primary_manufacturer_part.manufacturer.name }}
-                    {% if subpart.part.manufacturer_parts.count > 1 %}
-                        <i>(+{{ subpart.part.manufacturer_parts.count }})</i>{% endif %}</td>
+                    {% if subpart.part.manufacturer_parts.count > 1 %}<i>(+{{ subpart.part.manufacturer_parts.count }})</i>{% endif %}</td>
                 <td class="text-normal">{{ subpart.part.primary_manufacturer_part.manufacturer_part_number }}</td>
-                <!-- <td class="text-normal">{{ subpart.extended_quantity }}</td> -->
-                <!-- <td class="text-normal">{{ subpart.order_quantity }}</td> -->
-                <td class="text-normal">{% if subpart.seller_part.data_source == 'octopart' %}
-                    <img title="Seller via Octopart." style="width: 16px; vertical-align: middle;"
-                         src="{% static 'bom/img/octopart_blue.svg' %}">{% endif %}{{ subpart.seller_part.seller.name | default:"-" }}</td>
-                <td class="text-normal">{{ subpart.seller_part.unit_cost | default:"-" }}</td>
-                <!-- <td class="text-normal">{{ subpart.extended_cost | default:"-" }}</td> -->
+                <td class="text-normal" id="bom-flat-seller-name-{{ subpart.part_revision.id }}">{{ subpart.seller_part.seller.name | default:"-" }}</td>
+                <td class="text-normal" id="bom-flat-unit-cost-{{ subpart.part_revision.id }}">{{ subpart.seller_part.unit_cost | default:"-" }}</td>
                 <td class="text-normal">{{ subpart.seller_part.nre_cost | default:"-" }}</td>
             </tr>
         {% empty %}
@@ -83,6 +85,18 @@
         {% endfor %}
     </table>
 </div>
+
+<!-- Table Sorter -->
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.2/js/jquery.tablesorter.min.js"></script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.31.2/js/jquery.tablesorter.widgets.min.js"></script>
+<script>
+    $(function () {
+        $("#flat-bom").on('update', function() {
+            $("#flat-bom").tablesorter({theme : "materialize"});
+        });
+        $("#flat-bom").tablesorter({theme : "materialize"});
+    });
+</script>
 
 <script>
     $(document).ready(function () {
@@ -98,3 +112,4 @@
             });
     });
 </script>
+

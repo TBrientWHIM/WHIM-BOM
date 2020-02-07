@@ -32,7 +32,7 @@ class UserModelChoiceField(forms.ModelChoiceField):
 class UserForm(forms.ModelForm):
     class Meta:
         model = User
-        fields = ['first_name', 'last_name', 'email', 'username']
+        fields = ['first_name', 'last_name', 'email', ]
 
 
 class UserAddForm(forms.ModelForm):
@@ -96,26 +96,38 @@ class UserMetaForm(forms.ModelForm):
         return self.instance
 
 
-class OrganizationForm(forms.Form):
+class OrganizationCreateForm(forms.ModelForm):
+    class Meta:
+        model = Organization
+        exclude = ['owner', 'subscription', 'google_drive_parent']
+        labels = {
+            "name": "Organization Name",
+            "number_item_len": "Part Number Length"
+        }
+
+
+class OrganizationForm(forms.ModelForm):
+    class Meta:
+        model = Organization
+        exclude = ['owner', 'subscription', 'google_drive_parent', 'number_scheme', ]
+        labels = {
+            "name": "Organization Name",
+            "number_item_len": "Part Number Length"
+        }
 
     def __init__(self, *args, **kwargs):
         self.organization = kwargs.pop('organization', None)
-        super(OrganizationForm, self).__init__(*args, **kwargs)
-        user_queryset = User.objects.filter(
-            id__in=UserMeta.objects.filter(organization=self.organization, role='A').values_list('user', flat=True)).order_by(
-            'first_name', 'last_name', 'email')
-        self.fields['owner'] = UserModelChoiceField(queryset=user_queryset, label='Owner', initial=self.organization.owner, required=True)
-        self.fields['name'] = forms.CharField(label="Name", initial=self.organization.name, required=True)
 
-    def save(self):
-        self.organization.owner = self.cleaned_data.get('owner')
-        self.organization.name = self.cleaned_data.get('name')
-        self.organization.save()
-        return self.organization
+        super(OrganizationForm, self).__init__(*args, **kwargs)
+        if self.organization:
+            user_queryset = User.objects.filter(
+                id__in=UserMeta.objects.filter(organization=self.organization, role='A').values_list('user', flat=True)).order_by(
+                'first_name', 'last_name', 'email')
+            self.fields['owner'] = UserModelChoiceField(queryset=user_queryset, label='Owner', initial=self.organization.owner, required=True)
+            # self.fields['name'] = forms.CharField(label="Name", initial=self.organization.name, required=True)
 
 
 class NumberItemLenForm(forms.Form):
-
     def __init__(self, *args, **kwargs):
         self.organization = kwargs.pop('organization', None)
         super(NumberItemLenForm, self).__init__(*args, **kwargs)
@@ -265,6 +277,9 @@ class PartClassForm(forms.ModelForm):
         return self.instance
 
 
+PartClassFormSet = forms.formset_factory(PartClassForm, extra=2, can_delete=True)
+
+
 class PartClassSelectionForm(forms.Form):
     def __init__(self, *args, **kwargs):
         self.organization = kwargs.pop('organization', None)
@@ -299,7 +314,7 @@ class PartClassCSVForm(forms.Form):
                     validation_error = forms.ValidationError("Missing required column named '{}'.".format(hdr), code='invalid')
                     self.add_error(None, validation_error)
 
-            if 'comment' in hdr and 'description' in hdr:
+            if 'comment' in headers and 'description' in headers:
                 validation_error = forms.ValidationError("Can only have a column named 'comment' or a column named 'description'.".format(hdr), code='invalid')
                 self.add_error(None, validation_error)
 
@@ -308,12 +323,16 @@ class PartClassCSVForm(forms.Form):
                 row_count += 1
                 part_class_data = {}
                 for idx, item in enumerate(row):
-                    part_class_data[headers[idx]] = item
+                    try:
+                        part_class_data[headers[idx]] = item
+                    except IndexError:
+                        continue
 
                 if 'name' in part_class_data and 'code' in part_class_data:
+                    name = part_class_data['name']
+                    code = part_class_data['code']
                     try:
-                        name = part_class_data['name']
-                        code = part_class_data['code']
+                        description_or_comment = ''
                         if not code.isdigit() or int(code) < 0:
                             validation_error = forms.ValidationError(
                                 "Part class 'code' in row {} must be a positive number. Uploading of this part class skipped.".format(row_count),
@@ -581,21 +600,21 @@ class PartForm(forms.ModelForm):
         number_variation = cleaned_data.get('number_variation')
 
         try:
-            if number_class is not None and number_class.code is not '':
+            if number_class is not None and number_class.code != '':
                 Part.verify_format_number_class(number_class.code)
         except AttributeError as e:
             validation_error = forms.ValidationError(str(e), code='invalid')
             self.add_error('number_class', validation_error)
 
         try:
-            if number_item is not '':
+            if number_item != '':
                 Part.verify_format_number_item(number_item, self.organization.number_item_len)
         except AttributeError as e:
             validation_error = forms.ValidationError(str(e), code='invalid')
             self.add_error('number_item', validation_error)
 
         try:
-            if number_variation is not '':
+            if number_variation != '':
                 Part.verify_format_number_variation(number_variation)
         except AttributeError as e:
             validation_error = forms.ValidationError(str(e), code='invalid')
